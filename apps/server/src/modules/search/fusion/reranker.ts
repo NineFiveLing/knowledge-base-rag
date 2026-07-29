@@ -20,17 +20,16 @@ type ChunkInput = {
   [key: string]: any;
 };
 
-/** 从输入 chunk 中提取文本内容 */
-function getText(c: ChunkInput): string {
-  return c.chunk_text || c.text || '';
-}
-
-/** 将 ChunkInput 映射为 ChunkResult（补充 text 字段） */
+/**
+ * 将 ChunkInput 映射为 ChunkResult（补充 text 字段，保留 chunk_text 以
+ * 兼容旧调用方——Reranker.rerank() 通过 { ...c } 展开时将其透传回返回值）
+ */
 function toChunkResult(c: ChunkInput): ChunkResult {
   return {
     chunk_id: c.chunk_id,
     postgres_doc_id: c.postgres_doc_id,
     text: c.text || c.chunk_text,
+    chunk_text: c.chunk_text,
     score: c.score,
     metadata: c.metadata as Record<string, any> | undefined,
   };

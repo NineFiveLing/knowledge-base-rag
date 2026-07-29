@@ -1,27 +1,33 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useAuthStore } from './stores/auth.store';
+import Layout from './components/layout/Layout';
+import LoginPage from './pages/login/LoginPage';
+import ChatPage from './pages/chat/ChatPage';
+import KnowledgeBasePage from './pages/knowledge-base/KnowledgeBasePage';
+import DocumentUploadPage from './pages/document/DocumentUploadPage';
+import DocumentManagePage from './pages/document/DocumentManagePage';
 
-/**
- * 应用根组件
- * 路由配置：后续各页面在此注册
- */
+/** 路由守卫：未登录跳转 /login */
+function Protected({ children }: { children: React.ReactNode }) {
+  const { user } = useAuthStore();
+  if (!user) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+/** 应用根组件：路由配置 */
 export default function App() {
   return (
     <BrowserRouter>
       <div className="app">
         <Routes>
-          <Route
-            path="/"
-            element={
-              <div className="flex items-center justify-center min-h-screen bg-gray-50">
-                <div className="text-center">
-                  <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                    📚 企业知识库 RAG 平台
-                  </h1>
-                  <p className="text-gray-500">智能文档检索与 AI 问答系统</p>
-                </div>
-              </div>
-            }
-          />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/" element={<Protected><Layout /></Protected>}>
+            <Route index element={<Navigate to="/chat" replace />} />
+            <Route path="chat" element={<ChatPage />} />
+            <Route path="knowledge" element={<KnowledgeBasePage />} />
+            <Route path="documents" element={<DocumentUploadPage />} />
+            <Route path="documents/manage" element={<DocumentManagePage />} />
+          </Route>
         </Routes>
       </div>
     </BrowserRouter>

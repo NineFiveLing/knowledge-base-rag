@@ -24,6 +24,10 @@ export default function Layout() {
               {item.icon} {item.label}
             </a>
           ))}
+          {/* 数据统计 */}
+          <a className={location.pathname.startsWith('/analytics') ? 'active' : ''} onClick={() => navigate('/analytics')}>
+            📊 数据统计
+          </a>
           {/* 系统管理（仅拥有 rbac:read 权限或 admin 角色可见） */}
           <Can permission="rbac:read">
             <a className={location.pathname.startsWith('/admin') ? 'active' : ''} onClick={() => navigate('/admin/roles')}>

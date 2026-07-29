@@ -15,6 +15,7 @@ import { MemoryModule } from './modules/memory/memory.module';
 import { RAGModule } from './modules/rag/rag.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { RbacModule } from './modules/rbac/rbac.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { SeedModule } from './database/seeds/seed.module';
 import { ObservabilityModule } from './common/observability/observability.module';
 import { PermissionGuard } from './common/guards/permission.guard';
@@ -33,7 +34,7 @@ import { PermissionGuard } from './common/guards/permission.guard';
     Neo4jModule, RedisModule, RustFSModule,
     SeedModule,
     AuthModule, UserModule, DocumentModule, SearchModule, MemoryModule,
-    RAGModule, ChatModule, RbacModule, ObservabilityModule,
+    RAGModule, ChatModule, RbacModule, AnalyticsModule, ObservabilityModule,
   ],
   providers: [
     { provide: 'APP_GUARD', useClass: PermissionGuard },

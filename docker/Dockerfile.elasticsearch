@@ -1,0 +1,11 @@
+# Elasticsearch 自定义镜像（含中文分词插件）
+# 版本与 docker-compose.yml 保持一致
+FROM elasticsearch:8.11.0
+
+# 安装 IK 中文分词器
+RUN elasticsearch-plugin install --batch \
+    https://release.infinilabs.com/analysis-ik/stable/elasticsearch-analysis-ik-8.11.0.zip
+
+# 安装拼音分词器
+RUN elasticsearch-plugin install --batch \
+    https://release.infinilabs.com/analysis-pinyin/stable/elasticsearch-analysis-pinyin-8.11.0.zip

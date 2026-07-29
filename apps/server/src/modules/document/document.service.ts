@@ -101,12 +101,24 @@ export class DocumentService {
   async list(
     dto: ListDocumentDto,
     user: { id: string; dept_id: string },
-  ): Promise<{ items: Document[]; total: number }> {
+  ): Promise<{ items: Partial<Document>[]; total: number; page: number; pageSize: number }> {
     const { page = 1, pageSize = 20, status, type, keyword } = dto;
 
     // 数据权限：公开文档 OR 本部门文档 OR 自己创建的文档
     const qb = this.docRepo
       .createQueryBuilder('doc')
+      .select([
+        'doc.id',
+        'doc.name',
+        'doc.type',
+        'doc.size',
+        'doc.status',
+        'doc.visibility',
+        'doc.uploader_id',
+        'doc.dept_id',
+        'doc.created_at',
+        'doc.updated_at',
+      ])
       .where(
         '(doc.visibility = :publicVis OR doc.dept_id = :deptId OR doc.uploader_id = :userId)',
         {
@@ -131,6 +143,6 @@ export class DocumentService {
       .take(pageSize);
 
     const [items, total] = await qb.getManyAndCount();
-    return { items, total };
+    return { items, total, page, pageSize };
   }
 }

@@ -41,7 +41,7 @@ export class AuthService {
     if (!user) throw new UnauthorizedException('用户名或密码错误');
     const valid = await bcrypt.compare(dto.password, user.password_hash);
     if (!valid) throw new UnauthorizedException('用户名或密码错误');
-    const payload = { sub: user.id, username: user.username };
+    const payload = { sub: user.id, username: user.username, dept_id: user.dept_id };
     return {
       access_token: this.jwtService.sign(payload),
       user: {

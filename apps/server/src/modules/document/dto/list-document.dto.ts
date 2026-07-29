@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, Min, Max } from 'class-validator';
+import { IsOptional, IsString, IsInt, Min, Max, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DocumentStatus } from '../entities/document.entity';
 
@@ -18,7 +18,7 @@ export class ListDocumentDto {
   pageSize?: number = 20;
 
   @IsOptional()
-  @IsString()
+  @IsEnum(DocumentStatus)
   status?: DocumentStatus;
 
   @IsOptional()

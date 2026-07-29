@@ -120,10 +120,7 @@ export class DocumentService {
       throw new BadRequestException(`文档状态为 ${doc.status}，无法触发索引`);
     }
 
-    doc.status = DocumentStatus.INDEXING;
-    await this.docRepo.save(doc);
-
-    // fire-and-forget 异步索引（不阻塞响应）
+    // fire-and-forget 异步索引（不阻塞响应，IndexerService 自行管理 INDEXING/INDEXED/FAILED）
     this.indexerService.indexDocument(docId)
       .then(() => {
         this.logger.log(`索引完成: ${docId}`);

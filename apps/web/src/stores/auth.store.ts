@@ -7,6 +7,7 @@ interface User {
   real_name: string;
   roles: string[];
   dept_id: string;
+  permissions?: string[];
 }
 
 interface AuthState {

@@ -6,6 +6,7 @@ import ChatPage from './pages/chat/ChatPage';
 import KnowledgeBasePage from './pages/knowledge-base/KnowledgeBasePage';
 import DocumentUploadPage from './pages/document/DocumentUploadPage';
 import DocumentManagePage from './pages/document/DocumentManagePage';
+import RoleManagePage from './pages/admin/RoleManagePage';
 
 /** 路由守卫：未登录跳转 /login */
 function Protected({ children }: { children: React.ReactNode }) {
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="knowledge" element={<KnowledgeBasePage />} />
             <Route path="documents" element={<DocumentUploadPage />} />
             <Route path="documents/manage" element={<DocumentManagePage />} />
+            <Route path="admin/roles" element={<RoleManagePage />} />
           </Route>
         </Routes>
       </div>

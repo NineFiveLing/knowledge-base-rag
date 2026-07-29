@@ -1,5 +1,6 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth.store';
+import Can from '../common/Can';
 
 /** 主布局：侧边栏导航 + 顶栏用户信息 + 内容区 */
 export default function Layout() {
@@ -23,6 +24,12 @@ export default function Layout() {
               {item.icon} {item.label}
             </a>
           ))}
+          {/* 系统管理（仅拥有 rbac:read 权限或 admin 角色可见） */}
+          <Can permission="rbac:read">
+            <a className={location.pathname.startsWith('/admin') ? 'active' : ''} onClick={() => navigate('/admin/roles')}>
+              🔑 角色管理
+            </a>
+          </Can>
         </nav>
       </aside>
       <div className="main-area">

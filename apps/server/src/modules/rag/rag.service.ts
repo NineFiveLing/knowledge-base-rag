@@ -11,6 +11,7 @@ import { routeByIntent, decideNext } from './nodes/routes';
 import { createVectorSearchTool, createESSearchTool, createNeo4jQueryTool } from './tools';
 import { SearchService } from '../search/search.service';
 import { MemoryService } from '../memory/memory.service';
+import { LangfuseService } from '../../common/observability/langfuse.service';
 
 /** RAG 服务：组装完整的 LangGraph Agentic RAG 工作流 */
 @Injectable()
@@ -23,6 +24,7 @@ export class RAGService implements OnModuleInit {
     private config: ConfigService,
     private search: SearchService,
     private memory: MemoryService,
+    private langfuse: LangfuseService,
   ) {
     const baseURL = config.get('DEEPSEEK_BASE_URL');
     const apiKey = config.get('DEEPSEEK_API_KEY');
@@ -50,20 +52,21 @@ export class RAGService implements OnModuleInit {
       JSON.stringify(await this.search.hybridSearch(entity, [], {}, { useES: false, useNeo4j: true }).then((r) => r.slice(0, 5))),
     );
 
-    const agentFollowUpNode = createFollowUpAgentNode(this.llm, [vectorTool, esTool, neo4jTool], this.memory);
+    const agentFollowUpNode = createFollowUpAgentNode(this.llm, [vectorTool, esTool, neo4jTool], this.memory, this.langfuse);
 
     this.graph = createRAGGraph(
-      createIntentClassifier(this.llm),
+      createIntentClassifier(this.llm, this.langfuse),
       this.directAnswer.bind(this),
       this.simpleRetrieval.bind(this),
-      createAgentNode(this.llm, [vectorTool, esTool, neo4jTool], this.memory),
+      createAgentNode(this.llm, [vectorTool, esTool, neo4jTool], this.memory, this.langfuse),
       agentFollowUpNode,
       createRetrievalNode(
         async (q) => JSON.stringify(await this.search.hybridSearch(q, await this.embed(q), {}, { useES: false, useNeo4j: false }).then((r) => r.slice(0, 5))),
         async (q) => JSON.stringify(await this.search.hybridSearch(q, [], {}, { useES: true, useNeo4j: false }).then((r) => r.slice(0, 5))),
         async (q) => JSON.stringify(await this.search.hybridSearch(q, [], {}, { useES: false, useNeo4j: true }).then((r) => r.slice(0, 5))),
+        this.langfuse,
       ),
-      createGenerateNode(this.llm, this.memory),
+      createGenerateNode(this.llm, this.memory, this.langfuse),
       routeByIntent,
       decideNext,
     );
@@ -105,9 +108,9 @@ export class RAGService implements OnModuleInit {
   }
 
   /** 流式问答 */
-  async streamQuery(userMessage: string, userId: string, sessionId: string) {
+  async streamQuery(userMessage: string, userId: string, sessionId: string, langfuseTraceId?: string) {
     return this.graph.streamEvents(
-      { messages: [new HumanMessage(userMessage)], userId, sessionId },
+      { messages: [new HumanMessage(userMessage)], userId, sessionId, langfuseTraceId: langfuseTraceId || '' },
       { version: 'v2' },
     );
   }

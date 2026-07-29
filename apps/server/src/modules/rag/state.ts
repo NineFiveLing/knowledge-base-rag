@@ -54,6 +54,11 @@ export const AgentState = Annotation.Root({
     reducer: (_, next) => next,
     default: () => '',
   }),
+  /** LangFuse trace ID（字符串，可安全序列化），未配置 LangFuse 时为空 */
+  langfuseTraceId: Annotation<string>({
+    reducer: (_, next) => next,
+    default: () => '',
+  }),
   toolCallsRemaining: Annotation<number>({
     reducer: (_, next) => next,
     default: () => 5,

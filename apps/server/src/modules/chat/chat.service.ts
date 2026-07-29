@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RAGService } from '../rag/rag.service';
 import { MemoryService } from '../memory/memory.service';
+import { LangfuseService } from '../../common/observability/langfuse.service';
 
 /** 聊天服务：SSE 流式 + 记忆管理 + "记住xxx"处理 */
 @Injectable()
@@ -8,6 +9,7 @@ export class ChatService {
   constructor(
     private rag: RAGService,
     public memory: MemoryService,
+    private langfuse: LangfuseService,
   ) {}
 
   async *streamAnswer(message: string, userId: string, sessionId: string) {
@@ -24,7 +26,8 @@ export class ChatService {
     await this.memory.onMessage(sessionId, userId, 'user', message);
 
     // 流式 RAG 回答
-    const stream = await this.rag.streamQuery(message, userId, sessionId);
+    const traceId = this.langfuse.createTrace('chat', { query: message }, userId, sessionId);
+    const stream = await this.rag.streamQuery(message, userId, sessionId, traceId || undefined);
     let fullAnswer = '';
     let sourcesSent = false;
 
@@ -132,6 +135,11 @@ export class ChatService {
     // 记录助手回答到 Redis
     if (fullAnswer) {
       await this.memory.onMessage(sessionId, userId, 'assistant', fullAnswer);
+    }
+
+    // flush LangFuse 上报
+    if (traceId) {
+      await this.langfuse.flush();
     }
   }
 }

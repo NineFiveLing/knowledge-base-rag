@@ -1,6 +1,7 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { AgentStateType } from '../state';
+import { LangfuseService } from '../../../common/observability/langfuse.service';
 
 const INTENT_PROMPT = `你是企业知识库助手的意图分类器。分析用户问题，归类为：
 
@@ -35,10 +36,13 @@ function detectFollowUp(message: string, history: Array<{ role: string; content:
 }
 
 /** 创建意图分类节点 */
-export function createIntentClassifier(llm: ChatOpenAI) {
+export function createIntentClassifier(llm: ChatOpenAI, langfuse?: LangfuseService) {
   return async function classifyIntent(state: AgentStateType): Promise<Partial<AgentStateType>> {
+    const startTime = Date.now();
     const lastMsg = state.messages[state.messages.length - 1];
     const content = typeof lastMsg.content === 'string' ? lastMsg.content : JSON.stringify(lastMsg.content);
+
+    let intent: string;
 
     // 追问检测（规则层，优先于 LLM 分类）
     const history = state.messages.slice(0, -1).map(m => ({
@@ -46,16 +50,22 @@ export function createIntentClassifier(llm: ChatOpenAI) {
       content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
     }));
     if (detectFollowUp(content, history)) {
-      return { intent: 'followup' };
+      intent = 'followup';
+    } else if (/^(记住|请记住|帮我记住)/.test(content)) {
+      // 检测"记住xxx"模式
+      intent = 'chat';
+    } else {
+      const res = await llm.invoke([new SystemMessage(INTENT_PROMPT), new HumanMessage(content)]);
+      const raw = String(res.content).trim().toLowerCase();
+      intent = ['chat', 'simple', 'complex'].includes(raw) ? raw : 'simple';
     }
 
-    // 检测"记住xxx"模式
-    if (/^(记住|请记住|帮我记住)/.test(content)) {
-      return { intent: 'chat' };
+    // 记录 LangFuse span
+    if (langfuse?.isEnabled() && state.langfuseTraceId) {
+      const span = langfuse.createSpan(state.langfuseTraceId, 'intent_classifier', { query: content });
+      langfuse.endSpan(span, { intent, latencyMs: Date.now() - startTime });
     }
 
-    const res = await llm.invoke([new SystemMessage(INTENT_PROMPT), new HumanMessage(content)]);
-    const intent = String(res.content).trim().toLowerCase();
-    return { intent: ['chat', 'simple', 'complex'].includes(intent) ? intent : 'simple' };
+    return { intent };
   };
 }

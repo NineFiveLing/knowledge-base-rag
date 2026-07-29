@@ -14,6 +14,7 @@ import { MemoryModule } from './modules/memory/memory.module';
 import { RAGModule } from './modules/rag/rag.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { SeedModule } from './database/seeds/seed.module';
+import { ObservabilityModule } from './common/observability/observability.module';
 
 /** 应用根模块 */
 @Module({
@@ -23,7 +24,7 @@ import { SeedModule } from './database/seeds/seed.module';
     Neo4jModule, RedisModule, RustFSModule,
     SeedModule,
     AuthModule, UserModule, DocumentModule, SearchModule, MemoryModule,
-    RAGModule, ChatModule,
+    RAGModule, ChatModule, ObservabilityModule,
   ],
 })
 export class AppModule {}

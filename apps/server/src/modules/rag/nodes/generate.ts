@@ -2,6 +2,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { AgentStateType } from '../state';
 import { MemoryService } from '../../memory/memory.service';
+import { LangfuseService } from '../../../common/observability/langfuse.service';
 
 const ANSWER_PROMPT = `基于检索到的企业知识库内容回答用户问题。要求：
 - 准确、简洁，涉及流程的用步骤式说明
@@ -9,8 +10,10 @@ const ANSWER_PROMPT = `基于检索到的企业知识库内容回答用户问题
 - 用户明确记忆的信息优先使用`;
 
 /** 创建答案生成节点 */
-export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService) {
+export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langfuse?: LangfuseService) {
   return async function generateAnswer(state: AgentStateType): Promise<Partial<AgentStateType>> {
+    const startTime = Date.now();
+
     // 降级检查：检索无命中时直接返回人性化提示，不调用 LLM
     if (state.searchDegraded) {
       return {
@@ -28,8 +31,19 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService) {
 
     const system = `${ANSWER_PROMPT}\n\n${contextParts.filter(Boolean).join('\n')}`;
     const userMsg = state.messages.filter((m) => m.getType() === 'human').slice(-1)[0];
+    const query = typeof userMsg.content === 'string' ? userMsg.content : '';
 
     const res = await llm.invoke([new SystemMessage(system), userMsg]);
+
+    // 记录 LLM generation
+    if (langfuse?.isEnabled() && state.langfuseTraceId) {
+      langfuse.recordGeneration(state.langfuseTraceId, {
+        name: 'answer_generation',
+        input: { query, chunksCount: state.retrievedChunks.length },
+        output: { answer: String(res.content) },
+        model: 'deepseek-chat',
+      });
+    }
 
     // 构建来源列表
     const sources = state.retrievedChunks.map((c, i) => ({

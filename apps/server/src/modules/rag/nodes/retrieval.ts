@@ -1,11 +1,13 @@
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { AgentStateType } from '../state';
+import { LangfuseService } from '../../../common/observability/langfuse.service';
 
 /** 创建检索执行节点：根据 LLM 选中的工具并行执行检索 */
 export function createRetrievalNode(
   vectorSearchFn: (q: string) => Promise<string>,
   esSearchFn: (q: string) => Promise<string>,
   neo4jQueryFn: (q: string) => Promise<string>,
+  langfuse?: LangfuseService,
 ) {
   const toolMap: Record<string, (q: string) => Promise<string>> = {
     vector_search: vectorSearchFn,
@@ -23,7 +25,15 @@ export function createRetrievalNode(
         if (fn) {
           const args = call.args as { query?: string; entity?: string };
           const q = args.query || args.entity || '';
+          const toolStart = Date.now();
           const result = await fn(q);
+          // 记录检索 span
+          if (langfuse?.isEnabled() && state.langfuseTraceId) {
+            const span = langfuse.createSpan(state.langfuseTraceId, `retrieval:${call.name}`, { query: q });
+            let resultCount = 0;
+            try { resultCount = JSON.parse(result).length; } catch { /* ignore */ }
+            langfuse.endSpan(span, { resultCount, latencyMs: Date.now() - toolStart });
+          }
           toolMsgs.push(new ToolMessage({ content: result, tool_call_id: call.id! }));
         }
       }

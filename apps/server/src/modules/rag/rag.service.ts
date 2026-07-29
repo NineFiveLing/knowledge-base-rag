@@ -75,7 +75,7 @@ export class RAGService implements OnModuleInit {
     const userMsg = state.messages[state.messages.length - 1];
     const query = typeof userMsg.content === 'string' ? userMsg.content : '';
     const emb = await this.embed(query);
-    const result = await this.search.searchWithThreshold(query, emb, {});
+    const result = await this.search.searchWithThreshold(query, emb, {}, { useES: false, useNeo4j: false });
 
     // 将完整 SearchResult 结构写入 state，保留 degraded/fallbackMessage
     return {

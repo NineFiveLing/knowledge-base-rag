@@ -109,8 +109,9 @@ export class SearchService {
     query: string,
     embedding: number[],
     deptFilter: any,
+    options?: SearchOptions,
   ): Promise<SearchResult> {
-    const fused = await this.hybridSearch(query, embedding, deptFilter);
+    const fused = await this.hybridSearch(query, embedding, deptFilter, options);
     const reranked = await rerank(query, fused, 5);
 
     const MIN_SCORE = 0.5;

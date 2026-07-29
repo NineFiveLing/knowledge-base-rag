@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PostgresModule } from './database/postgres/postgres.module';
+import { MongoDBModule } from './database/mongodb/mongodb.module';
 import { DocumentModule } from './modules/document/document.module';
 
 /**
@@ -16,6 +17,8 @@ import { DocumentModule } from './modules/document/document.module';
     }),
     // PostgreSQL 数据库连接（pgvector），全局可用
     PostgresModule,
+    // MongoDB 数据库连接（Markdown 正文存储）
+    MongoDBModule,
     // 文档管理模块（注册 Document 实体）
     DocumentModule,
   ],

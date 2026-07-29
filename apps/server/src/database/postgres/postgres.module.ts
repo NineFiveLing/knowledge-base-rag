@@ -1,9 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, Global } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { VectorService } from './vector.service';
 
-/** PostgreSQL + PGVector 数据库模块 */
+/** PostgreSQL + PGVector 数据库模块（全局） */
+@Global()
 @Module({
   imports: [
     TypeOrmModule.forRootAsync({

@@ -34,9 +34,9 @@ export class IndexerService {
       configuration: { baseURL: config.get('DEEPSEEK_BASE_URL') },
     });
     this.embeddings = new OpenAIEmbeddings({
-      modelName: process.env.EMBEDDING_MODEL || 'text-embedding-v2',
-      openAIApiKey: process.env.OPENAI_API_KEY,
-      configuration: { baseURL: process.env.OPENAI_BASE_URL },
+      modelName: this.config.get('EMBEDDING_MODEL', 'text-embedding-v2'),
+      openAIApiKey: this.config.get('OPENAI_API_KEY'),
+      configuration: { baseURL: this.config.get('OPENAI_BASE_URL') },
     });
   }
 

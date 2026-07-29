@@ -1,0 +1,12 @@
+{
+  "name": "knowledge-base-rag",
+  "private": true,
+  "scripts": {
+    "dev:server": "pnpm --filter server dev",
+    "dev:web": "pnpm --filter web dev",
+    "dev": "concurrently \"pnpm dev:server\" \"pnpm dev:web\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.0.0"
+  }
+}

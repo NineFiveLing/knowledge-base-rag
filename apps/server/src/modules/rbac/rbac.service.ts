@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
 
@@ -47,66 +47,92 @@ export class RbacService {
       [dto.name, code, dto.description],
     );
 
-    for (const permCode of dto.permissionCodes) {
+    if (dto.permissionCodes.length > 0) {
       await this.dataSource.query(
         `INSERT INTO role_permissions (role_id, permission_id)
-         SELECT $1, id FROM permissions WHERE code = $2`,
-        [role.id, permCode],
+         SELECT $1, id FROM permissions WHERE code = ANY($2)`,
+        [role.id, dto.permissionCodes],
       );
     }
 
     return this.getRole(role.id);
   }
 
-  /** 更新角色（名称 + 权限全量替换） */
+  /** 更新角色（名称 + 权限全量替换，事务保护） */
   async updateRole(id: string, dto: UpdateRoleDto) {
-    await this.getRole(id); // 检查存在性
-
-    if (dto.name) {
-      const code = dto.name.toLowerCase().replace(/\s+/g, '_');
-      await this.dataSource.query(
-        'UPDATE roles SET name = $1, code = $2 WHERE id = $3', [dto.name, code, id],
+    return this.dataSource.transaction(async (mgr) => {
+      // 事务内检查存在性，避免竞态条件
+      const [existing] = await mgr.query(
+        'SELECT id, is_system FROM roles WHERE id = $1', [id],
       );
-    }
+      if (!existing) throw new NotFoundException('角色不存在');
 
-    if (dto.permissionCodes) {
-      await this.dataSource.query('DELETE FROM role_permissions WHERE role_id = $1', [id]);
-      for (const permCode of dto.permissionCodes) {
-        await this.dataSource.query(
-          `INSERT INTO role_permissions (role_id, permission_id)
-           SELECT $1, id FROM permissions WHERE code = $2`,
-          [id, permCode],
+      if (dto.name) {
+        const code = dto.name.toLowerCase().replace(/\s+/g, '_');
+        await mgr.query(
+          'UPDATE roles SET name = $1, code = $2 WHERE id = $3', [dto.name, code, id],
         );
       }
-    }
+
+      if (dto.permissionCodes) {
+        await mgr.query('DELETE FROM role_permissions WHERE role_id = $1', [id]);
+        if (dto.permissionCodes.length > 0) {
+          await mgr.query(
+            `INSERT INTO role_permissions (role_id, permission_id)
+             SELECT $1, id FROM permissions WHERE code = ANY($2)`,
+            [id, dto.permissionCodes],
+          );
+        }
+      }
+    });
 
     return this.getRole(id);
   }
 
-  /** 删除角色（系统角色不可删除） */
+  /** 删除角色（系统角色不可删除，事务保护） */
   async deleteRole(id: string) {
-    const [role] = await this.dataSource.query(
-      'SELECT is_system FROM roles WHERE id = $1', [id],
-    );
-    if (!role) throw new NotFoundException('角色不存在');
-    if (role.is_system) throw new ConflictException('系统角色不可删除');
+    return this.dataSource.transaction(async (mgr) => {
+      const [role] = await mgr.query(
+        'SELECT is_system FROM roles WHERE id = $1', [id],
+      );
+      if (!role) throw new NotFoundException('角色不存在');
+      if (role.is_system) throw new ConflictException('系统角色不可删除');
 
-    await this.dataSource.query('DELETE FROM user_roles WHERE role_id = $1', [id]);
-    await this.dataSource.query('DELETE FROM role_permissions WHERE role_id = $1', [id]);
-    await this.dataSource.query('DELETE FROM roles WHERE id = $1', [id]);
+      await mgr.query('DELETE FROM user_roles WHERE role_id = $1', [id]);
+      await mgr.query('DELETE FROM role_permissions WHERE role_id = $1', [id]);
+      await mgr.query('DELETE FROM roles WHERE id = $1', [id]);
+    });
     return { success: true };
   }
 
-  /** 为用户分配角色（全量替换） */
+  /** 为用户分配角色（全量替换，含存在性校验） */
   async assignUserRoles(userId: string, roleIds: string[]) {
-    await this.dataSource.query('DELETE FROM user_roles WHERE user_id = $1', [userId]);
-    for (const roleId of roleIds) {
-      await this.dataSource.query(
-        'INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-        [userId, roleId],
-      );
-    }
-    return this.getUserRoles(userId);
+    // 校验用户是否存在
+    const [user] = await this.dataSource.query(
+      'SELECT id FROM users WHERE id = $1', [userId],
+    );
+    if (!user) throw new NotFoundException('用户不存在');
+
+    return this.dataSource.transaction(async (mgr) => {
+      // 校验所有角色是否存在
+      if (roleIds.length > 0) {
+        const existingRoles = await mgr.query(
+          'SELECT id FROM roles WHERE id = ANY($1)', [roleIds],
+        );
+        if (existingRoles.length !== roleIds.length) {
+          throw new BadRequestException('部分角色不存在');
+        }
+      }
+
+      await mgr.query('DELETE FROM user_roles WHERE user_id = $1', [userId]);
+      if (roleIds.length > 0) {
+        await mgr.query(
+          `INSERT INTO user_roles (user_id, role_id)
+           SELECT $1, unnest($2::uuid[]) ON CONFLICT DO NOTHING`,
+          [userId, roleIds],
+        );
+      }
+    }).then(() => this.getUserRoles(userId));
   }
 
   /** 获取用户的角色列表 */

@@ -1,10 +1,12 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { RequirePermission } from '../../common/guards/permission.guard';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RbacService } from './rbac.service';
 import { CreateRoleDto, UpdateRoleDto, AssignRoleDto } from './dto/role.dto';
 
 /** RBAC 管理控制器：角色 CRUD + 用户角色分配 */
 @Controller('rbac')
+@UseGuards(JwtAuthGuard)
 export class RbacController {
   constructor(private readonly rbacService: RbacService) {}
 

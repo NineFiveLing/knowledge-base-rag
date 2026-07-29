@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
 import { PostgresModule } from './database/postgres/postgres.module';
 import { MongoDBModule } from './database/mongodb/mongodb.module';
 import { ElasticsearchModule } from './database/elasticsearch/es.module';
@@ -20,6 +21,12 @@ import { ObservabilityModule } from './common/observability/observability.module
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
+    BullModule.forRoot({
+      connection: {
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379', 10),
+      },
+    }),
     PostgresModule, MongoDBModule, ElasticsearchModule,
     Neo4jModule, RedisModule, RustFSModule,
     SeedModule,

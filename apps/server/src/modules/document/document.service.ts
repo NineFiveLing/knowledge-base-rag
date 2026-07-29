@@ -5,6 +5,7 @@ import { Document, DocumentStatus, DocumentVisibility } from './entities/documen
 import { RustFSService } from '../../database/rustfs/rustfs.service';
 import { MongoDBService } from '../../database/mongodb/mongodb.service';
 import { IndexerService } from './services/indexer.service';
+import { IndexQueueService } from './services/index-queue.service';
 import { DocumentParser, ParseResult } from './parsers/parser.interface';
 import { ListDocumentDto } from './dto/list-document.dto';
 
@@ -31,6 +32,7 @@ export class DocumentService {
     private rustfs: RustFSService,
     private mongo: MongoDBService,
     private indexerService: IndexerService,
+    private indexQueue: IndexQueueService,
   ) {}
 
   /** 注册解析器 */
@@ -120,14 +122,9 @@ export class DocumentService {
       throw new BadRequestException(`文档状态为 ${doc.status}，无法触发索引`);
     }
 
-    // fire-and-forget 异步索引（不阻塞响应，IndexerService 自行管理 INDEXING/INDEXED/FAILED）
-    this.indexerService.indexDocument(docId)
-      .then(() => {
-        this.logger.log(`索引完成: ${docId}`);
-      })
-      .catch((err) => {
-        this.logger.error(`索引失败: ${docId}`, err.message);
-      });
+    // BullMQ 异步索引：入队后由 IndexWorkerService 消费
+    await this.indexQueue.addJob(docId);
+    this.logger.log(`索引入队: ${docId}`);
 
     return { docId, status: DocumentStatus.INDEXING };
   }

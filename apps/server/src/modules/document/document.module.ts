@@ -1,5 +1,6 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { BullModule } from '@nestjs/bullmq';
 import { Document } from './entities/document.entity';
 import { DocumentController } from './document.controller';
 import { DocumentService } from './document.service';
@@ -15,13 +16,27 @@ import { VideoParser } from './parsers/video.parser';
 import { DocumentParser } from './parsers/parser.interface';
 import { ChunkerService } from './services/chunker.service';
 import { IndexerService } from './services/indexer.service';
+import { IndexQueueService } from './services/index-queue.service';
+import { IndexWorkerService } from './services/index-worker.service';
 
 /** 文档管理模块：上传、解析、分块、索引全流程 */
 @Module({
-  imports: [TypeOrmModule.forFeature([Document])],
+  imports: [
+    TypeOrmModule.forFeature([Document]),
+    BullModule.registerQueue({
+      name: 'document-index',
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 1000 },
+        removeOnComplete: 100,
+        removeOnFail: 200,
+      },
+    }),
+  ],
   controllers: [DocumentController],
   providers: [
     DocumentService, ChunkerService, IndexerService,
+    IndexQueueService, IndexWorkerService,
     PdfParser, WordParser, MarkdownParser, TextParser,
     ExcelParser, PptParser,
     ImageParser, AudioParser, VideoParser,

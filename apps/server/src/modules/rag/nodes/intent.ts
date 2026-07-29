@@ -17,7 +17,7 @@ function detectFollowUp(message: string, history: Array<{ role: string; content:
   const trimmed = message.trim();
 
   const followUpPatterns = [
-    /^(那|那么|这个|那个|它|这|那|上面|前面|刚才|刚刚)/,
+    /^(那么|这个|那个|它|这|那|上面|前面|刚才|刚刚)/,
     /^(第二个|第\d+个|还有呢|继续说|详细|展开|具体)/,
     /^(能|可以|能不能).*(详细|具体|再|展开|说|讲)/,
     /^(什么意思|为什么|然后呢|接着说|所以呢)/,

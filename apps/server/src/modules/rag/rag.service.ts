@@ -85,6 +85,8 @@ export class RAGService implements OnModuleInit {
       retrievedChunks: result.results.map((r: any) => ({
         chunk_text: r.chunk_text,
         score: r.score,
+        chunk_id: r.chunk_id,
+        postgres_doc_id: r.postgres_doc_id,
       })),
       // 降级信息通过额外字段传递
       searchDegraded: result.degraded,

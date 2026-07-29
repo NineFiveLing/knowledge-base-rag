@@ -22,7 +22,12 @@ export const AgentState = Annotation.Root({
     reducer: (_, next) => next,
     default: () => '',
   }),
-  retrievedChunks: Annotation<Array<{ chunk_text: string; score: number }>>({
+  retrievedChunks: Annotation<Array<{
+    chunk_text: string;
+    score: number;
+    chunk_id?: string;
+    postgres_doc_id?: string;
+  }>>({
     reducer: (_, next) => next,
     default: () => [],
   }),
@@ -35,6 +40,15 @@ export const AgentState = Annotation.Root({
   searchFallbackMessage: Annotation<string>({
     reducer: (_, next) => next,
     default: () => '',
+  }),
+  /** 检索来源列表，用于前端展示 */
+  sources: Annotation<Array<{
+    index: number;
+    docId: string;
+    chunkId: string;
+  }>>({
+    reducer: (_, next) => next,
+    default: () => [],
   }),
   finalAnswer: Annotation<string>({
     reducer: (_, next) => next,

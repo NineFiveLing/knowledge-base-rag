@@ -30,13 +30,32 @@ export class ChatService {
     for await (const event of stream) {
       if (event.event === 'on_chat_model_stream' && event.data?.chunk?.content) {
         const token = event.data.chunk.content;
-        fullAnswer += token;
-        yield { type: 'text', content: token };
+        // 检测来源标记：包含 SOURCES HTML 注释的 token 需要特殊处理
+        if (typeof token === 'string' && token.includes('<!-- SOURCES:')) {
+          const match = token.match(/<!-- SOURCES:(.*?)-->/);
+          if (match) {
+            try {
+              const sources = JSON.parse(match[1]);
+              yield { type: 'sources', sources };
+            } catch { /* ignore parse error */ }
+          }
+          // 剥离标记，保留标记前的文本
+          const cleanToken = token.replace(/<!-- SOURCES:.*?-->/, '');
+          if (cleanToken) {
+            fullAnswer += cleanToken;
+            yield { type: 'text', content: cleanToken };
+          }
+        } else {
+          fullAnswer += token;
+          yield { type: 'text', content: token };
+        }
       }
 
       if (event.data?.chunk?.finalAnswer) {
         fullAnswer = event.data.chunk.finalAnswer;
-        yield { type: 'text', content: fullAnswer };
+        // 同样需要过滤 finalAnswer 中的来源标记
+        const clean = fullAnswer.replace(/<!-- SOURCES:.*?-->/, '');
+        yield { type: 'text', content: clean };
       }
     }
 

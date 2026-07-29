@@ -8,6 +8,7 @@ export function useSSE() {
       sessionId: string,
       onToken: (token: string) => void,
       onDone: () => void,
+      onSources?: (sources: Array<{ index: number; docId: string; chunkId: string }>) => void,
     ) => {
       const token = localStorage.getItem('access_token');
       const response = await fetch('/api/chat/stream', {
@@ -31,6 +32,7 @@ export function useSSE() {
             try {
               const data = JSON.parse(line.slice(6));
               if (data.type === 'text') onToken(data.content);
+              if (data.type === 'sources' && onSources) onSources(data.sources);
             } catch { /* skip malformed */ }
           }
         }

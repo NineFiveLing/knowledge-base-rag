@@ -15,6 +15,7 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService) {
     if (state.searchDegraded) {
       return {
         finalAnswer: state.searchFallbackMessage || '抱歉，未找到相关信息。',
+        sources: [],
       };
     }
 
@@ -29,6 +30,20 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService) {
     const userMsg = state.messages.filter((m) => m.getType() === 'human').slice(-1)[0];
 
     const res = await llm.invoke([new SystemMessage(system), userMsg]);
-    return { finalAnswer: String(res.content), messages: [res] };
+
+    // 构建来源列表
+    const sources = state.retrievedChunks.map((c, i) => ({
+      index: i + 1,
+      docId: c.postgres_doc_id || '',
+      chunkId: c.chunk_id || '',
+    }));
+
+    // 将来源 JSON 嵌入答案末尾，前端/SSE 层解析后剥离
+    const sourcesTag = `\n<!-- SOURCES:${JSON.stringify(sources)} -->`;
+    return {
+      finalAnswer: String(res.content) + sourcesTag,
+      messages: [res],
+      sources,
+    };
   };
 }

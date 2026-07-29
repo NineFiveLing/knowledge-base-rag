@@ -8,6 +8,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState('');
   const [input, setInput] = useState('');
+  const [sources, setSources] = useState<Array<{ index: number; docId: string; chunkId: string }>>([]);
   const { sendMessage } = useSSE();
   const sessionId = useRef(`sess-${Date.now()}`).current;
 
@@ -25,6 +26,8 @@ export default function ChatPage() {
         if (prev) setMessages((msgs) => [...msgs, { role: 'assistant', content: prev }]);
         return '';
       });
+    }, (srcs) => {
+      setSources(srcs);
     });
   };
 
@@ -36,6 +39,16 @@ export default function ChatPage() {
         ))}
         {streaming && <div className="chat-bubble assistant streaming">{streaming}</div>}
       </div>
+      {sources.length > 0 && (
+        <div className="sources-bar">
+          <span className="sources-label">参考来源：</span>
+          {sources.map((s) => (
+            <span key={s.index} className="source-tag" title={`文档: ${s.docId} | 片段: ${s.chunkId}`}>
+              [{s.index}]
+            </span>
+          ))}
+        </div>
+      )}
       <div className="chat-input-area">
         <input value={input} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}

@@ -31,8 +31,9 @@ export class ChatService {
     let fullAnswer = '';
     let sourcesSent = false;
 
-    /** 从文本中提取 SOURCES 标记，返回 { sources, cleanText } */
-    const extractSources = (text: string): { sources?: any[]; cleanText: string } => {
+    try {
+      /** 从文本中提取 SOURCES 标记，返回 { sources, cleanText } */
+      const extractSources = (text: string): { sources?: any[]; cleanText: string } => {
       const match = text.match(/<!-- SOURCES:(.*?)-->/);
       if (!match) return { cleanText: text };
       try {
@@ -136,10 +137,11 @@ export class ChatService {
     if (fullAnswer) {
       await this.memory.onMessage(sessionId, userId, 'assistant', fullAnswer);
     }
-
-    // flush LangFuse 上报
-    if (traceId) {
-      await this.langfuse.flush();
+    } finally {
+      // flush LangFuse 上报（异常退出时也确保 flush）
+      if (traceId) {
+        await this.langfuse.flush();
+      }
     }
   }
 }

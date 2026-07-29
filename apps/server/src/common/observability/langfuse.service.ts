@@ -90,10 +90,12 @@ export class LangfuseService implements OnModuleInit, OnModuleDestroy {
     gen.end();
   }
 
-  /** 手动 flush，确保数据上报 */
+  /** 手动 flush，确保数据上报，并清理已上报的 trace 防止内存泄漏 */
   async flush(): Promise<void> {
     if (this.client) {
       await this.client.flushAsync();
     }
+    // 清理已上报的 trace，防止内存泄漏
+    this.activeTraces.clear();
   }
 }

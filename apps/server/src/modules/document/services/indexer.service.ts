@@ -1,13 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ChatOpenAI } from '@langchain/openai';
+import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai';
 import { ConfigService } from '@nestjs/config';
 import { Document, DocumentStatus } from '../entities/document.entity';
 import { ChunkerService, Chunk } from './chunker.service';
 import { ElasticsearchService } from '../../../database/elasticsearch/es.service';
 import { Neo4jService } from '../../../database/neo4j/neo4j.service';
 import { MongoDBService } from '../../../database/mongodb/mongodb.service';
+import { VectorService } from '../../../database/postgres/vector.service';
 
 /**
  * 三路索引服务（阶段二：异步分块 & 索引）
@@ -16,6 +17,7 @@ import { MongoDBService } from '../../../database/mongodb/mongodb.service';
 @Injectable()
 export class IndexerService {
   private llm: ChatOpenAI;
+  private embeddings: OpenAIEmbeddings;
 
   constructor(
     @InjectRepository(Document) private docRepo: Repository<Document>,
@@ -24,11 +26,17 @@ export class IndexerService {
     private neo4j: Neo4jService,
     private mongo: MongoDBService,
     private config: ConfigService,
+    private vectorService: VectorService,
   ) {
     this.llm = new ChatOpenAI({
       model: 'deepseek-chat',
       apiKey: config.get('DEEPSEEK_API_KEY'),
       configuration: { baseURL: config.get('DEEPSEEK_BASE_URL') },
+    });
+    this.embeddings = new OpenAIEmbeddings({
+      modelName: process.env.EMBEDDING_MODEL || 'text-embedding-v2',
+      openAIApiKey: process.env.OPENAI_API_KEY,
+      configuration: { baseURL: process.env.OPENAI_BASE_URL },
     });
   }
 
@@ -90,7 +98,20 @@ export class IndexerService {
     for (const entity of entities) {
       await this.neo4j.createEntityRelation(entity.name, entity.type, chunk.chunk_id);
     }
-    // PGVector 向量写入在 Task 19 中集成
+    // PGVector 向量写入：通过阿里云百炼 text-embedding-v2 生成 embedding
+    const [embedding] = await this.embeddings.embedDocuments([chunk.chunk_text]);
+    await this.vectorService.insertChunk(
+      chunk.chunk_id,
+      chunk.postgres_doc_id,
+      chunk.chunk_text,
+      embedding,
+      {
+        title_level: chunk.title_level,
+        has_image: chunk.has_image,
+        has_table: chunk.has_table,
+        chunk_index: chunk.chunk_index,
+      },
+    );
   }
 
   /** LLM 提取关键词 */

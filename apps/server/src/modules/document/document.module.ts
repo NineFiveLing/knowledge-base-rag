@@ -15,10 +15,11 @@ import { VideoParser } from './parsers/video.parser';
 import { DocumentParser } from './parsers/parser.interface';
 import { ChunkerService } from './services/chunker.service';
 import { IndexerService } from './services/indexer.service';
+import { PostgresModule } from '../../database/postgres/postgres.module';
 
 /** 文档管理模块：上传、解析、分块、索引全流程 */
 @Module({
-  imports: [TypeOrmModule.forFeature([Document])],
+  imports: [TypeOrmModule.forFeature([Document]), PostgresModule],
   controllers: [DocumentController],
   providers: [
     DocumentService, ChunkerService, IndexerService,

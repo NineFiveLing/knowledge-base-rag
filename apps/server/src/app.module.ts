@@ -9,22 +9,20 @@ import { RustFSModule } from './database/rustfs/rustfs.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { DocumentModule } from './modules/document/document.module';
+import { SearchModule } from './modules/search/search.module';
 import { SeedModule } from './database/seeds/seed.module';
 
-/**
- * 应用根模块
- */
+/** 应用根模块 */
 @Module({
   imports: [
-    // 全局环境变量配置
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
-    // 数据库连接层（六大数据存储）
-    PostgresModule, ElasticsearchModule, Neo4jModule, RedisModule,
-    MongoDBModule, RustFSModule,
-    // 种子数据（首次启动自动初始化角色/权限/部门）
+    // 数据库连接层
+    PostgresModule, MongoDBModule, ElasticsearchModule,
+    Neo4jModule, RedisModule, RustFSModule,
+    // 种子数据
     SeedModule,
     // 业务模块
-    AuthModule, UserModule, DocumentModule,
+    AuthModule, UserModule, DocumentModule, SearchModule,
   ],
 })
 export class AppModule {}

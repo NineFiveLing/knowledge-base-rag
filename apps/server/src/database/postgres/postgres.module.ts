@@ -1,12 +1,9 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { VectorService } from './vector.service';
 
-/**
- * PostgreSQL 数据库连接模块
- * 使用 pgvector/pgvector:pg16 镜像，内置向量扩展
- * 全局可用，通过 TypeORM 的 autoLoadEntities 自动注册实体
- */
+/** PostgreSQL + PGVector 数据库模块 */
 @Module({
   imports: [
     TypeOrmModule.forRootAsync({
@@ -18,11 +15,12 @@ import { ConfigService } from '@nestjs/config';
         username: config.get('POSTGRES_USER', 'postgres'),
         password: config.get('POSTGRES_PASSWORD', 'password'),
         database: config.get('POSTGRES_DB', 'ai_agent'),
-        autoLoadEntities: true,   // 自动加载各模块注册的 @Entity
-        synchronize: true,        // MVP 开发阶段自动同步表结构，生产环境改为 migration
+        autoLoadEntities: true,
+        synchronize: true,
       }),
     }),
   ],
-  exports: [TypeOrmModule],
+  providers: [VectorService],
+  exports: [TypeOrmModule, VectorService],
 })
 export class PostgresModule {}

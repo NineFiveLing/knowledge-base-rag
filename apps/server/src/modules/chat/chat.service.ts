@@ -26,24 +26,34 @@ export class ChatService {
     // 流式 RAG 回答
     const stream = await this.rag.streamQuery(message, userId, sessionId);
     let fullAnswer = '';
+    let sourcesSent = false;
+
+    /** 从文本中提取 SOURCES 标记，返回 { sources, cleanText } */
+    const extractSources = (text: string): { sources?: any[]; cleanText: string } => {
+      const match = text.match(/<!-- SOURCES:(.*?)-->/);
+      if (!match) return { cleanText: text };
+      try {
+        return { sources: JSON.parse(match[1]), cleanText: text.replace(/<!-- SOURCES:.*?-->/, '') };
+      } catch {
+        return { cleanText: text };
+      }
+    };
 
     for await (const event of stream) {
       if (event.event === 'on_chat_model_stream' && event.data?.chunk?.content) {
         const token = event.data.chunk.content;
-        // 检测来源标记：包含 SOURCES HTML 注释的 token 需要特殊处理
-        if (typeof token === 'string' && token.includes('<!-- SOURCES:')) {
-          const match = token.match(/<!-- SOURCES:(.*?)-->/);
-          if (match) {
-            try {
-              const sources = JSON.parse(match[1]);
-              yield { type: 'sources', sources };
-            } catch { /* ignore parse error */ }
+        if (typeof token !== 'string') continue;
+
+        // 检测来源标记（含跨 token 缓冲区）
+        if (!sourcesSent && token.includes('<!-- SOURCES:')) {
+          const { sources, cleanText } = extractSources(token);
+          if (sources) {
+            yield { type: 'sources', sources };
+            sourcesSent = true;
           }
-          // 剥离标记，保留标记前的文本
-          const cleanToken = token.replace(/<!-- SOURCES:.*?-->/, '');
-          if (cleanToken) {
-            fullAnswer += cleanToken;
-            yield { type: 'text', content: cleanToken };
+          if (cleanText) {
+            fullAnswer += cleanText;
+            yield { type: 'text', content: cleanText };
           }
         } else {
           fullAnswer += token;
@@ -52,9 +62,19 @@ export class ChatService {
       }
 
       if (event.data?.chunk?.finalAnswer) {
-        fullAnswer = event.data.chunk.finalAnswer;
-        // 同样需要过滤 finalAnswer 中的来源标记
-        const clean = fullAnswer.replace(/<!-- SOURCES:.*?-->/, '');
+        const answer = String(event.data.chunk.finalAnswer);
+        if (!sourcesSent && answer.includes('<!-- SOURCES:')) {
+          const { sources } = extractSources(answer);
+          if (sources) {
+            yield { type: 'sources', sources };
+            sourcesSent = true;
+          }
+        }
+        const clean = answer.replace(/<!-- SOURCES:.*?-->/, '');
+        // 仅在 token 流未覆盖时回退使用 finalAnswer
+        if (clean && (!fullAnswer || clean.length > fullAnswer.length)) {
+          fullAnswer = clean;
+        }
         yield { type: 'text', content: clean };
       }
     }

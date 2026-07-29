@@ -1,5 +1,5 @@
 import {
-  Controller, Post, Get, Param, Query, UseGuards,
+  Controller, Post, Get, Delete, Param, Query, UseGuards,
   UseInterceptors, UploadedFile, Body,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -49,6 +49,40 @@ export class DocumentController {
     @Param('id') id: string,
     @CurrentUser() user: { id: string },
   ) {
+    return this.docService.triggerIndex(id, user.id);
+  }
+
+  /** 删除文档（级联清理所有索引和存储） */
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  async delete(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    await this.docService.deleteDocument(id, user.id);
+    return { success: true };
+  }
+
+  /** 预览文档 Markdown 正文 */
+  @Get(':id/preview')
+  @UseGuards(JwtAuthGuard)
+  async preview(@Param('id') id: string) {
+    const doc = await this.docService.findById(id);
+    const markdownDoc = await this.docService.getPreviewMarkdown(doc.id);
+    return {
+      metadata: { id: doc.id, name: doc.name, type: doc.type, status: doc.status },
+      markdown: markdownDoc?.markdown_content?.slice(0, 10000) || '',
+    };
+  }
+
+  /** 重新索引：清理旧索引 → 触发新索引 */
+  @Post(':id/reindex')
+  @UseGuards(JwtAuthGuard)
+  async reindex(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    await this.docService.clearIndexes(id);
     return this.docService.triggerIndex(id, user.id);
   }
 }

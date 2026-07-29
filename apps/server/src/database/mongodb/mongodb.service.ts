@@ -37,6 +37,11 @@ export class MongoDBService {
       .exec();
   }
 
+  /** 按文档 ID 删除 Markdown 正文 */
+  async deleteByDocId(postgresDocId: string): Promise<void> {
+    await this.docMdModel.deleteOne({ postgres_doc_id: postgresDocId });
+  }
+
   /** 更新 Markdown 正文（阶段一回填 postgres_doc_id 时使用） */
   async updateMarkdown(
     postgresDocId: string,

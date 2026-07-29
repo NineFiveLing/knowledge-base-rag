@@ -45,6 +45,14 @@ export class VectorService implements OnModuleInit {
     );
   }
 
+  /** 按文档 ID 删除所有向量 chunk */
+  async deleteByDocId(postgresDocId: string): Promise<void> {
+    await this.em.query(
+      'DELETE FROM chunks WHERE postgres_doc_id = $1',
+      [postgresDocId],
+    );
+  }
+
   /** 余弦相似度检索（带权限过滤） */
   async similaritySearch(
     embedding: number[],

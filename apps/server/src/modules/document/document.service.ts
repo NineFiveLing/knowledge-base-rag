@@ -4,6 +4,9 @@ import { Repository } from 'typeorm';
 import { Document, DocumentStatus, DocumentVisibility } from './entities/document.entity';
 import { RustFSService } from '../../database/rustfs/rustfs.service';
 import { MongoDBService } from '../../database/mongodb/mongodb.service';
+import { ElasticsearchService } from '../../database/elasticsearch/es.service';
+import { Neo4jService } from '../../database/neo4j/neo4j.service';
+import { VectorService } from '../../database/postgres/vector.service';
 import { IndexerService } from './services/indexer.service';
 import { IndexQueueService } from './services/index-queue.service';
 import { DocumentParser, ParseResult } from './parsers/parser.interface';
@@ -33,6 +36,9 @@ export class DocumentService {
     private mongo: MongoDBService,
     private indexerService: IndexerService,
     private indexQueue: IndexQueueService,
+    private esService: ElasticsearchService,
+    private neo4jService: Neo4jService,
+    private vectorService: VectorService,
   ) {}
 
   /** 注册解析器 */
@@ -179,5 +185,74 @@ export class DocumentService {
 
     const [items, total] = await qb.getManyAndCount();
     return { items, total, page, pageSize };
+  }
+
+  /** 根据 ID 查询文档（不含权限检查的纯查询） */
+  async findById(docId: string): Promise<Document> {
+    const doc = await this.docRepo.findOne({ where: { id: docId } });
+    if (!doc) throw new NotFoundException('文档不存在');
+    return doc;
+  }
+
+  /** 级联删除文档：从下游到上游清理所有存储中的文档数据 */
+  async deleteDocument(docId: string, userId: string): Promise<void> {
+    const doc = await this.findById(docId);
+    if (doc.uploader_id !== userId) throw new ForbiddenException('只能删除自己上传的文档');
+
+    const errors: string[] = [];
+
+    // 1. Neo4j：删除实体和 chunk 节点
+    try {
+      await this.neo4jService.deleteDocument(docId);
+    } catch (e) { errors.push('Neo4j'); }
+
+    // 2. ES：按 postgres_doc_id 删除所有 chunk
+    try {
+      await this.esService.client.deleteByQuery({
+        index: 'chunks',
+        query: { term: { postgres_doc_id: docId } },
+      });
+    } catch (e) { errors.push('ES'); }
+
+    // 3. PGVector：删除向量 chunks
+    try {
+      await this.vectorService.deleteByDocId(docId);
+    } catch (e) { errors.push('PGVector'); }
+
+    // 4. MongoDB：删除 Markdown 正文
+    try {
+      await this.mongo.deleteByDocId(docId);
+    } catch (e) { errors.push('MongoDB'); }
+
+    // 5. RustFS：删除原文件
+    try {
+      if (doc.rustfs_file_url) {
+        await this.rustfs.deleteFile(doc.rustfs_file_url);
+      }
+    } catch (e) { errors.push('RustFS'); }
+
+    // 6. Postgres：删除元信息（最后）
+    await this.docRepo.remove(doc);
+
+    if (errors.length > 0) {
+      this.logger.warn(`文档 ${docId} 部分清理失败: ${errors.join(', ')}`);
+    }
+  }
+
+  /** 清理文档所有索引并重置状态，用于 reindex 前 */
+  async clearIndexes(docId: string): Promise<void> {
+    await this.neo4jService.deleteDocument(docId).catch(() => {});
+    await this.esService.client.deleteByQuery({
+      index: 'chunks',
+      query: { term: { postgres_doc_id: docId } },
+    }).catch(() => {});
+    await this.vectorService.deleteByDocId(docId).catch(() => {});
+    // 重置状态为 PARSED，使 triggerIndex 可以再次触发
+    await this.docRepo.update(docId, { status: DocumentStatus.PARSED });
+  }
+
+  /** 获取文档的 Markdown 正文（用于预览） */
+  async getPreviewMarkdown(docId: string) {
+    return this.mongo.getMarkdown(docId);
   }
 }

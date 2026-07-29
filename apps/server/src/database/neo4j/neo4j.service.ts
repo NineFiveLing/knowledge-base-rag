@@ -70,6 +70,18 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  /** 级联删除文档关联的所有 Chunk 及关系节点 */
+  async deleteDocument(postgresDocId: string): Promise<void> {
+    await this.run(
+      'MATCH (c:Chunk {postgres_doc_id: $id}) DETACH DELETE c',
+      { id: postgresDocId },
+    );
+    await this.run(
+      'MATCH (d:Document {postgres_doc_id: $id}) DETACH DELETE d',
+      { id: postgresDocId },
+    );
+  }
+
   /** 查询实体及其关联的分块 */
   async queryEntities(query: string, maxHops: number = 2) {
     const result = await this.run(

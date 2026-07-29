@@ -16,7 +16,11 @@ export class ElasticsearchService implements OnModuleInit {
   async onModuleInit() {
     const host = this.config.get('ES_HOST', 'localhost');
     const port = this.config.get('ES_PORT', '9200');
-    this.client = new Client({ node: `http://${host}:${port}` });
+    this.client = new Client({
+      node: `http://${host}:${port}`,
+      maxRetries: 3,
+      requestTimeout: 30000,
+    });
     await this.ensureIndex();
   }
 

@@ -18,6 +18,7 @@ export class RedisService implements OnModuleInit {
       host: this.config.get('REDIS_HOST', 'localhost'),
       port: Number(this.config.get('REDIS_PORT', '6379')),
       lazyConnect: false,
+      retryStrategy: (times) => Math.min(times * 100, 3000), // 最长 3s 退避重连
     });
   }
 

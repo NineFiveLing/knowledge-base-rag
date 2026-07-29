@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { AppModule } from './app.module';
 
 /**
@@ -17,6 +18,9 @@ async function bootstrap() {
     origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
     credentials: true,
   });
+
+  // 全局异常过滤器：统一错误响应格式
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   // 全局验证管道：自动校验 DTO，剥离非白名单字段
   app.useGlobalPipes(

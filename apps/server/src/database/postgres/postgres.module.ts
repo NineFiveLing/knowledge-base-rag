@@ -18,6 +18,9 @@ import { VectorService } from './vector.service';
         database: config.get('POSTGRES_DB', 'ai_agent'),
         autoLoadEntities: true,
         synchronize: true,
+        extra: {
+          connectionTimeoutMillis: 5000,
+        },
       }),
     }),
   ],

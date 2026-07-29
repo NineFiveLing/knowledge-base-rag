@@ -12,6 +12,7 @@ import { createVectorSearchTool, createESSearchTool, createNeo4jQueryTool } from
 import { SearchService } from '../search/search.service';
 import { MemoryService } from '../memory/memory.service';
 import { LangfuseService } from '../../common/observability/langfuse.service';
+import { withLLMRetry } from '../../common/utils/retry.util';
 
 /** RAG 服务：组装完整的 LangGraph Agentic RAG 工作流 */
 @Injectable()
@@ -73,7 +74,7 @@ export class RAGService implements OnModuleInit {
   }
 
   private async directAnswer(state: any) {
-    const res = await this.llm.invoke(state.messages);
+    const res = await withLLMRetry(() => this.llm.invoke(state.messages));
     return { finalAnswer: String(res.content), messages: [res] };
   }
 
@@ -117,7 +118,7 @@ export class RAGService implements OnModuleInit {
 
   /** 获取文本 Embedding */
   async embed(text: string): Promise<number[]> {
-    const res = await this.embeddings.embedQuery(text);
+    const res = await withLLMRetry(() => this.embeddings.embedQuery(text));
     return res;
   }
 }

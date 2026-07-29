@@ -10,6 +10,7 @@ export function createRAGGraph(
   directAnswer: any,
   simpleRetrieval: any,
   agentReAct: any,
+  agentFollowUpNode: any,
   executeTools: any,
   generateAnswer: any,
   routeByIntent: any,
@@ -20,19 +21,27 @@ export function createRAGGraph(
     .addNode('direct_answer', directAnswer)
     .addNode('simple_retrieval', simpleRetrieval)
     .addNode('agent', agentReAct)
+    .addNode('agent_followup', agentFollowUpNode)
     .addNode('retrieval_tools', executeTools)
     .addNode('generate_answer', generateAnswer)
 
-    .addConditionalEdges('__start__', routeByIntent, {
+    // 修复：确保意图分类被执行
+    .addEdge('__start__', 'intent_classifier')
+    .addConditionalEdges('intent_classifier', routeByIntent, {
       chat: 'direct_answer',
       simple: 'simple_retrieval',
       complex: 'agent',
+      followup: 'agent_followup',
     })
 
     .addEdge('direct_answer', END)
     .addEdge('simple_retrieval', 'generate_answer')
 
     .addConditionalEdges('agent', decideNext, {
+      tools: 'retrieval_tools',
+      answer: 'generate_answer',
+    })
+    .addConditionalEdges('agent_followup', decideNext, {
       tools: 'retrieval_tools',
       answer: 'generate_answer',
     })

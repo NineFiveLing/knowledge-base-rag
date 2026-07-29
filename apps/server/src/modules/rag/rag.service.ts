@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { HumanMessage } from '@langchain/core/messages';
 import { createRAGGraph } from './graph';
 import { createIntentClassifier } from './nodes/intent';
-import { createAgentNode } from './nodes/agent';
+import { createAgentNode, createFollowUpAgentNode } from './nodes/agent';
 import { createRetrievalNode } from './nodes/retrieval';
 import { createGenerateNode } from './nodes/generate';
 import { routeByIntent, decideNext } from './nodes/routes';
@@ -50,11 +50,14 @@ export class RAGService implements OnModuleInit {
       JSON.stringify(await this.search.hybridSearch(entity, [], {}, { useES: false, useNeo4j: true }).then((r) => r.slice(0, 5))),
     );
 
+    const agentFollowUpNode = createFollowUpAgentNode(this.llm, [vectorTool, esTool, neo4jTool], this.memory);
+
     this.graph = createRAGGraph(
       createIntentClassifier(this.llm),
       this.directAnswer.bind(this),
       this.simpleRetrieval.bind(this),
       createAgentNode(this.llm, [vectorTool, esTool, neo4jTool], this.memory),
+      agentFollowUpNode,
       createRetrievalNode(
         async (q) => JSON.stringify(await this.search.hybridSearch(q, await this.embed(q), {}, { useES: false, useNeo4j: false }).then((r) => r.slice(0, 5))),
         async (q) => JSON.stringify(await this.search.hybridSearch(q, [], {}, { useES: true, useNeo4j: false }).then((r) => r.slice(0, 5))),

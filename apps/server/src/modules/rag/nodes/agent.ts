@@ -32,3 +32,20 @@ export function createAgentNode(llm: ChatOpenAI, tools: any[], memory: MemorySer
     return { messages: [res] };
   };
 }
+
+/**
+ * 创建追问模式 Agent 节点：maxRounds=1（仅一轮工具调用），
+ * 进入时覆盖 toolCallsRemaining，之后委托给普通 agent 循环
+ */
+export function createFollowUpAgentNode(llm: ChatOpenAI, tools: any[], memory: MemoryService) {
+  const agentReAct = createAgentNode(llm, tools, memory);
+
+  return async function agentFollowUp(state: AgentStateType): Promise<Partial<AgentStateType>> {
+    // 首次进入时限制工具调用轮次为 1（追问模式轻量检索）
+    const result = await agentReAct(state);
+    return {
+      ...result,
+      toolCallsRemaining: 1, // 覆盖：追问模式下只允许 1 次工具调用
+    };
+  };
+}

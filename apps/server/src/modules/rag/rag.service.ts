@@ -75,8 +75,18 @@ export class RAGService implements OnModuleInit {
     const userMsg = state.messages[state.messages.length - 1];
     const query = typeof userMsg.content === 'string' ? userMsg.content : '';
     const emb = await this.embed(query);
-    const results = await this.search.hybridSearch(query, emb, {}, { useES: false, useNeo4j: false });
-    return { retrievedChunks: results.slice(0, 3).map((r: any) => ({ chunk_text: r.chunk_text, score: r.score })) };
+    const result = await this.search.searchWithThreshold(query, emb, {});
+
+    // 将完整 SearchResult 结构写入 state，保留 degraded/fallbackMessage
+    return {
+      retrievedChunks: result.results.map((r: any) => ({
+        chunk_text: r.chunk_text,
+        score: r.score,
+      })),
+      // 降级信息通过额外字段传递
+      searchDegraded: result.degraded,
+      searchFallbackMessage: result.fallbackMessage,
+    };
   }
 
   /** 同步问答 */

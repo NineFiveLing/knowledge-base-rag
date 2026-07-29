@@ -13,8 +13,17 @@ interface SearchOptions {
 
 /** 检索返回结果 */
 interface SearchResult {
+  /** 是否命中（rerankScore >= 阈值） */
   hit: boolean;
+  /** 降级标记：true 表示启用降级回复 */
+  degraded: boolean;
+  /** 降级原因代码 */
+  degradeReason?: string;
+  /** 降级时的用户友好提示语 */
+  fallbackMessage?: string;
+  /** 无命中时的人性化提示 */
   message?: string;
+  /** 符合条件的检索结果 */
   results: Array<{
     chunk_id: string;
     postgres_doc_id: string;
@@ -110,6 +119,9 @@ export class SearchService {
     if (validResults.length === 0) {
       return {
         hit: false,
+        degraded: true,
+        degradeReason: 'no_result_above_threshold',
+        fallbackMessage: '抱歉，未在知识库中找到与您问题相关的文档。请尝试换个问法。',
         message: '抱歉，未找到与该问题相关的文档。请尝试更换关键词或联系相关部门获取帮助。',
         results: [],
       };
@@ -117,6 +129,7 @@ export class SearchService {
 
     return {
       hit: true,
+      degraded: false,
       results: validResults.map(({ rerankScore: _, ...rest }) => rest),
     };
   }

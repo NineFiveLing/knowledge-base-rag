@@ -11,6 +11,13 @@ const ANSWER_PROMPT = `基于检索到的企业知识库内容回答用户问题
 /** 创建答案生成节点 */
 export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService) {
   return async function generateAnswer(state: AgentStateType): Promise<Partial<AgentStateType>> {
+    // 降级检查：检索无命中时直接返回人性化提示，不调用 LLM
+    if (state.searchDegraded) {
+      return {
+        finalAnswer: state.searchFallbackMessage || '抱歉，未找到相关信息。',
+      };
+    }
+
     const ctx = await memory.buildPromptContext(state.sessionId, state.userId);
 
     const contextParts = [ctx.systemContext];

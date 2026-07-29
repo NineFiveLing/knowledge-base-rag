@@ -6,6 +6,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { DocumentService } from './document.service';
+import { ListDocumentDto } from './dto/list-document.dto';
 
 /** 文档管理控制器 */
 @Controller('documents')
@@ -24,16 +25,14 @@ export class DocumentController {
     return this.docService.uploadStage1(file, user.id, deptId);
   }
 
-  /** 查询文档列表（带权限过滤） */
+  /** 查询文档列表（带权限过滤，支持分页和条件过滤） */
   @Get()
   @UseGuards(JwtAuthGuard)
   async list(
-    @CurrentUser() user: { id: string },
-    @Query('page') page = 1,
-    @Query('pageSize') pageSize = 20,
+    @CurrentUser() user: { id: string; dept_id: string },
+    @Query() dto: ListDocumentDto,
   ) {
-    // MVP: 简化实现，后续接入权限过滤
-    return { items: [], total: 0, page, pageSize };
+    return this.docService.list(dto, user);
   }
 
   /** 查询单个文档详情 */

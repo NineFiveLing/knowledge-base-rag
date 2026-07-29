@@ -1,10 +1,11 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Document, DocumentStatus } from './entities/document.entity';
+import { Document, DocumentStatus, DocumentVisibility } from './entities/document.entity';
 import { RustFSService } from '../../database/rustfs/rustfs.service';
 import { MongoDBService } from '../../database/mongodb/mongodb.service';
 import { DocumentParser, ParseResult } from './parsers/parser.interface';
+import { ListDocumentDto } from './dto/list-document.dto';
 
 /** 文件扩展名 → 类型映射 */
 const TYPE_MAP: Record<string, string> = {
@@ -91,5 +92,45 @@ export class DocumentService {
       }
       throw error;
     }
+  }
+
+  /**
+   * 文档列表查询：支持分页、状态/类型/关键词过滤，按数据权限隔离
+   * 权限规则：公开文档所有人可见 + 本部门文档 + 自己创建的私有文档
+   */
+  async list(
+    dto: ListDocumentDto,
+    user: { id: string; dept_id: string },
+  ): Promise<{ items: Document[]; total: number }> {
+    const { page = 1, pageSize = 20, status, type, keyword } = dto;
+
+    // 数据权限：公开文档 OR 本部门文档 OR 自己创建的文档
+    const qb = this.docRepo
+      .createQueryBuilder('doc')
+      .where(
+        '(doc.visibility = :publicVis OR doc.dept_id = :deptId OR doc.uploader_id = :userId)',
+        {
+          publicVis: DocumentVisibility.PUBLIC,
+          deptId: user.dept_id,
+          userId: user.id,
+        },
+      );
+
+    if (status) {
+      qb.andWhere('doc.status = :status', { status });
+    }
+    if (type) {
+      qb.andWhere('doc.type = :type', { type });
+    }
+    if (keyword) {
+      qb.andWhere('doc.name ILIKE :kw', { kw: `%${keyword}%` });
+    }
+
+    qb.orderBy('doc.created_at', 'DESC')
+      .skip((page - 1) * pageSize)
+      .take(pageSize);
+
+    const [items, total] = await qb.getManyAndCount();
+    return { items, total };
   }
 }

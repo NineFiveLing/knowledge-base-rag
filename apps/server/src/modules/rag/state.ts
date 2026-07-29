@@ -1,0 +1,39 @@
+import { BaseMessage } from '@langchain/core/messages';
+import { Annotation } from '@langchain/langgraph';
+
+/**
+ * Agent 状态定义
+ * LangGraph 1.x Annotation API: 每个字段需要 value (reducer/binaryOp)
+ */
+export const AgentState = Annotation.Root({
+  messages: Annotation<BaseMessage[]>({
+    reducer: (left, right) => left.concat(right),
+    default: () => [],
+  }),
+  intent: Annotation<string>({
+    reducer: (_, next) => next,
+    default: () => '',
+  }),
+  userId: Annotation<string>({
+    reducer: (_, next) => next,
+    default: () => '',
+  }),
+  sessionId: Annotation<string>({
+    reducer: (_, next) => next,
+    default: () => '',
+  }),
+  retrievedChunks: Annotation<Array<{ chunk_text: string; score: number }>>({
+    reducer: (_, next) => next,
+    default: () => [],
+  }),
+  finalAnswer: Annotation<string>({
+    reducer: (_, next) => next,
+    default: () => '',
+  }),
+  toolCallsRemaining: Annotation<number>({
+    reducer: (_, next) => next,
+    default: () => 5,
+  }),
+});
+
+export type AgentStateType = typeof AgentState.State;

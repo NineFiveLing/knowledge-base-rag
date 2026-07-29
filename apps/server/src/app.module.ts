@@ -10,19 +10,20 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { DocumentModule } from './modules/document/document.module';
 import { SearchModule } from './modules/search/search.module';
+import { MemoryModule } from './modules/memory/memory.module';
+import { RAGModule } from './modules/rag/rag.module';
+import { ChatModule } from './modules/chat/chat.module';
 import { SeedModule } from './database/seeds/seed.module';
 
 /** 应用根模块 */
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
-    // 数据库连接层
     PostgresModule, MongoDBModule, ElasticsearchModule,
     Neo4jModule, RedisModule, RustFSModule,
-    // 种子数据
     SeedModule,
-    // 业务模块
-    AuthModule, UserModule, DocumentModule, SearchModule,
+    AuthModule, UserModule, DocumentModule, SearchModule, MemoryModule,
+    RAGModule, ChatModule,
   ],
 })
 export class AppModule {}

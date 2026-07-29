@@ -9,6 +9,7 @@ import { ElasticsearchService } from '../../../database/elasticsearch/es.service
 import { Neo4jService } from '../../../database/neo4j/neo4j.service';
 import { MongoDBService } from '../../../database/mongodb/mongodb.service';
 import { VectorService } from '../../../database/postgres/vector.service';
+import { withLLMRetry } from '../../../common/utils/retry.util';
 
 /**
  * 三路索引服务（阶段二：异步分块 & 索引）
@@ -71,6 +72,20 @@ export class IndexerService {
 
   /** 单个分块的三路写入 */
   private async indexChunk(chunk: Chunk, doc: Document) {
+    // 多模态增强：若 chunk 包含图片，生成 AI 图片描述并追加到 chunk_text
+    // 描述文本将自动被后续的关键词提取、ES 索引和 embedding 向量化覆盖
+    if (chunk.has_image) {
+      try {
+        const imageDesc = await this.generateImageDescription(chunk.chunk_text);
+        if (imageDesc) {
+          chunk.chunk_text = `${chunk.chunk_text}\n[图片描述: ${imageDesc}]`;
+        }
+      } catch (err) {
+        // 降级：图片描述生成失败不影响正常索引流程
+        console.warn(`图片描述生成失败: ${doc.id}/${chunk.chunk_id}`, (err as Error).message);
+      }
+    }
+
     // Neo4j：创建 chunk 节点 + 关系
     await this.neo4j.createChunkRelation(chunk.postgres_doc_id, chunk.chunk_id);
 
@@ -132,5 +147,29 @@ export class IndexerService {
     } catch {
       return [];
     }
+  }
+
+  /** 多模态：提取 Markdown 中的图片 URL，调用多模态 LLM 生成中文图片描述 */
+  private async generateImageDescription(markdownText: string): Promise<string> {
+    const imageUrls = [...markdownText.matchAll(/!\[.*?\]\((https?:\/\/[^)]+)\)/g)]
+      .map(m => m[1]);
+
+    if (imageUrls.length === 0) return '';
+
+    const messages: any[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '请用简洁中文描述以下图片的内容，一句话即可。' },
+          ...imageUrls.slice(0, 3).map(url => ({
+            type: 'image_url' as const,
+            image_url: { url },
+          })),
+        ],
+      },
+    ];
+
+    const response = await withLLMRetry(() => this.llm.invoke(messages));
+    return typeof response.content === 'string' ? response.content : '';
   }
 }

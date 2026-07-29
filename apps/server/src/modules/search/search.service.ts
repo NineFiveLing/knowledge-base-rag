@@ -118,8 +118,13 @@ export class SearchService {
     const deptHash = this.simpleHash(JSON.stringify(deptFilter || {}));
     const cacheKey = `${queryHash}:${deptHash}`;
 
-    // 1. 查缓存
-    const cached = await this.redis.getCachedSearch(cacheKey);
+    // 1. 查缓存（缓存故障不阻塞检索，降级走完整流程）
+    let cached: any = null;
+    try {
+      cached = await this.redis.getCachedSearch(cacheKey);
+    } catch (err) {
+      console.warn('Redis 缓存读取失败，降级走完整检索', (err as Error).message);
+    }
     if (cached) {
       return cached as SearchResult;
     }
@@ -151,9 +156,13 @@ export class SearchService {
       };
     }
 
-    // 4. 写入缓存（30 分钟 TTL，降级结果不缓存）
+    // 4. 写入缓存（异步不阻塞，失败不影响请求）
     if (result.hit) {
-      await this.redis.cacheSearchResult(cacheKey, result as any);
+      try {
+        await this.redis.cacheSearchResult(cacheKey, result as any);
+      } catch (err) {
+        console.warn('Redis 缓存写入失败', (err as Error).message);
+      }
     }
 
     return result;

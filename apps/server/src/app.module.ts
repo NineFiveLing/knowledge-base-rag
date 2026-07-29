@@ -2,6 +2,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PostgresModule } from './database/postgres/postgres.module';
 import { MongoDBModule } from './database/mongodb/mongodb.module';
+import { ElasticsearchModule } from './database/elasticsearch/es.module';
+import { Neo4jModule } from './database/neo4j/neo4j.module';
+import { RedisModule } from './database/redis/redis.module';
+import { RustFSModule } from './database/rustfs/rustfs.module';
 import { DocumentModule } from './modules/document/document.module';
 
 /**
@@ -15,12 +19,15 @@ import { DocumentModule } from './modules/document/document.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
-    // PostgreSQL 数据库连接（pgvector），全局可用
-    PostgresModule,
-    // MongoDB 数据库连接（Markdown 正文存储）
-    MongoDBModule,
-    // 文档管理模块（注册 Document 实体）
-    DocumentModule,
+    // 数据库连接层（六大数据存储）
+    PostgresModule,        // PostgreSQL（元信息 + pgvector 向量）
+    MongoDBModule,        // MongoDB（Markdown 正文原文）
+    ElasticsearchModule,  // Elasticsearch（全文检索 + IK 分词）
+    Neo4jModule,          // Neo4j（知识图谱 + 实体关系）
+    RedisModule,         // Redis（会话短期记忆 + 检索缓存）
+    RustFSModule,        // RustFS（对象存储：原文件 + 图片/附件）
+    // 业务模块
+    DocumentModule,      // 文档管理（注册 Document 实体）
   ],
 })
 export class AppModule {}

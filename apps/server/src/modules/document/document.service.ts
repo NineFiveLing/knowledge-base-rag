@@ -1,9 +1,10 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Document, DocumentStatus, DocumentVisibility } from './entities/document.entity';
 import { RustFSService } from '../../database/rustfs/rustfs.service';
 import { MongoDBService } from '../../database/mongodb/mongodb.service';
+import { IndexerService } from './services/indexer.service';
 import { DocumentParser, ParseResult } from './parsers/parser.interface';
 import { ListDocumentDto } from './dto/list-document.dto';
 
@@ -23,10 +24,13 @@ const TYPE_MAP: Record<string, string> = {
 export class DocumentService {
   private parsers = new Map<string, DocumentParser>();
 
+  private readonly logger = new Logger(DocumentService.name);
+
   constructor(
     @InjectRepository(Document) private docRepo: Repository<Document>,
     private rustfs: RustFSService,
     private mongo: MongoDBService,
+    private indexerService: IndexerService,
   ) {}
 
   /** 注册解析器 */
@@ -84,6 +88,11 @@ export class DocumentService {
       // 6. 回填 MongoDB 中的 postgres_doc_id
       await this.mongo.updateMarkdown(saved.id, result.markdown);
 
+      // 异步触发阶段二索引（不阻塞上传响应）
+      this.triggerIndex(saved.id, uploaderId).catch((err) => {
+        this.logger.error(`上传后自动索引失败: ${saved.id}`, err.message);
+      });
+
       return { docId: saved.id, status: saved.status };
     } catch (error) {
       // 回滚：清理已上传的 RustFS 文件
@@ -92,6 +101,38 @@ export class DocumentService {
       }
       throw error;
     }
+  }
+
+  /** 触发阶段二异步索引（fire-and-forget） */
+  async triggerIndex(docId: string, userId: string): Promise<{ docId: string; status: string }> {
+    const doc = await this.docRepo.findOne({ where: { id: docId } });
+    if (!doc) {
+      throw new NotFoundException('文档不存在');
+    }
+
+    // 权限检查：仅创建者可触发
+    if (doc.uploader_id !== userId) {
+      throw new ForbiddenException('无权限操作此文档');
+    }
+
+    // 仅 parsed 状态可触发索引
+    if (doc.status !== DocumentStatus.PARSED) {
+      throw new BadRequestException(`文档状态为 ${doc.status}，无法触发索引`);
+    }
+
+    doc.status = DocumentStatus.INDEXING;
+    await this.docRepo.save(doc);
+
+    // fire-and-forget 异步索引（不阻塞响应）
+    this.indexerService.indexDocument(docId)
+      .then(() => {
+        this.logger.log(`索引完成: ${docId}`);
+      })
+      .catch((err) => {
+        this.logger.error(`索引失败: ${docId}`, err.message);
+      });
+
+    return { docId, status: DocumentStatus.INDEXING };
   }
 
   /**

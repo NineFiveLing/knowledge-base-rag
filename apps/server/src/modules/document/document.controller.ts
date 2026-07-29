@@ -1,5 +1,5 @@
 import {
-  Controller, Post, Get, Param, Query, UseGuards,
+  Controller, Post, Get, Param, Query, Req, UseGuards,
   UseInterceptors, UploadedFile, Body,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -40,5 +40,15 @@ export class DocumentController {
   @UseGuards(JwtAuthGuard)
   async detail(@Param('id') id: string) {
     return { id };
+  }
+
+  /** 手动触发阶段二索引 */
+  @Post(':id/index')
+  @UseGuards(JwtAuthGuard)
+  async triggerIndex(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.docService.triggerIndex(id, user.id);
   }
 }

@@ -1,0 +1,242 @@
+[
+  {
+    "id": "case-001",
+    "query": "公司年假怎么申请？",
+    "expectedKeywords": ["年假", "申请", "审批", "提前"],
+    "intent": "complex",
+    "category": "hr_policy",
+    "enabled": true
+  },
+  {
+    "id": "case-002",
+    "query": "你好",
+    "expectedKeywords": [],
+    "intent": "chat",
+    "category": "chat",
+    "enabled": true
+  },
+  {
+    "id": "case-003",
+    "query": "考勤制度",
+    "expectedKeywords": ["考勤", "打卡", "迟到"],
+    "intent": "simple",
+    "category": "hr_policy",
+    "enabled": true
+  },
+  {
+    "id": "case-004",
+    "query": "报销流程怎么走？",
+    "expectedKeywords": ["报销", "发票", "审批", "提交"],
+    "intent": "complex",
+    "category": "finance",
+    "enabled": true
+  },
+  {
+    "id": "case-005",
+    "query": "年假有几天？",
+    "expectedKeywords": ["天", "年假", "工龄"],
+    "intent": "simple",
+    "category": "hr_policy",
+    "enabled": true
+  },
+  {
+    "id": "case-006",
+    "query": "加班费怎么算？",
+    "expectedKeywords": ["加班", "工资", "倍"],
+    "intent": "simple",
+    "category": "hr_policy",
+    "enabled": true
+  },
+  {
+    "id": "case-007",
+    "query": "出差申请流程",
+    "expectedKeywords": ["出差", "申请", "审批", "报销"],
+    "intent": "complex",
+    "category": "admin",
+    "enabled": true
+  },
+  {
+    "id": "case-008",
+    "query": "五险一金缴纳比例",
+    "expectedKeywords": ["社保", "公积金", "缴纳"],
+    "intent": "simple",
+    "category": "hr_policy",
+    "enabled": true
+  },
+  {
+    "id": "case-009",
+    "query": "谢谢",
+    "expectedKeywords": [],
+    "intent": "chat",
+    "category": "chat",
+    "enabled": true
+  },
+  {
+    "id": "case-010",
+    "query": "部门架构是怎样的？",
+    "expectedKeywords": ["部门", "组织", "架构"],
+    "intent": "simple",
+    "category": "org",
+    "enabled": true
+  },
+  {
+    "id": "case-011",
+    "query": "请假需要什么材料？",
+    "expectedKeywords": ["请假", "证明", "材料"],
+    "intent": "simple",
+    "category": "hr_policy",
+    "enabled": true
+  },
+  {
+    "id": "case-012",
+    "query": "转正考核标准",
+    "expectedKeywords": ["转正", "试用期", "考核"],
+    "intent": "simple",
+    "category": "hr_policy",
+    "enabled": true
+  },
+  {
+    "id": "case-013",
+    "query": "离职交接要做什么？",
+    "expectedKeywords": ["离职", "交接", "手续"],
+    "intent": "complex",
+    "category": "hr_policy",
+    "enabled": true
+  },
+  {
+    "id": "case-014",
+    "query": "公司提供哪些培训？",
+    "expectedKeywords": ["培训", "学习", "课程"],
+    "intent": "simple",
+    "category": "hr_development",
+    "enabled": true
+  },
+  {
+    "id": "case-015",
+    "query": "项目立项流程",
+    "expectedKeywords": ["立项", "项目", "审批"],
+    "intent": "complex",
+    "category": "pm",
+    "enabled": true
+  },
+  {
+    "id": "case-016",
+    "query": "代码规范有哪些要求？",
+    "expectedKeywords": ["代码", "规范", "格式", "命名"],
+    "intent": "simple",
+    "category": "engineering",
+    "enabled": true
+  },
+  {
+    "id": "case-017",
+    "query": "假期怎么算工资？",
+    "expectedKeywords": ["假期", "工资", "计算"],
+    "intent": "simple",
+    "category": "hr_policy",
+    "enabled": true
+  },
+  {
+    "id": "case-018",
+    "query": "会议室怎么预定？",
+    "expectedKeywords": ["会议室", "预定", "预约"],
+    "intent": "simple",
+    "category": "admin",
+    "enabled": true
+  },
+  {
+    "id": "case-019",
+    "query": "采购申请需要哪些审批节点？",
+    "expectedKeywords": ["采购", "审批", "流程"],
+    "intent": "complex",
+    "category": "finance",
+    "enabled": true
+  },
+  {
+    "id": "case-020",
+    "query": "入职第一天要准备什么？",
+    "expectedKeywords": ["入职", "材料", "准备", "证件"],
+    "intent": "simple",
+    "category": "hr_policy",
+    "enabled": true
+  },
+  {
+    "id": "case-021",
+    "query": "信息安全注意事项",
+    "expectedKeywords": ["安全", "密码", "数据", "保密"],
+    "intent": "simple",
+    "category": "it",
+    "enabled": true
+  },
+  {
+    "id": "case-022",
+    "query": "绩效评估怎么打分？",
+    "expectedKeywords": ["绩效", "KPI", "评估", "打分"],
+    "intent": "complex",
+    "category": "hr_development",
+    "enabled": true
+  },
+  {
+    "id": "case-023",
+    "query": "病假需要医院证明吗？",
+    "expectedKeywords": ["病假", "医院", "证明"],
+    "intent": "simple",
+    "category": "hr_policy",
+    "enabled": true
+  },
+  {
+    "id": "case-024",
+    "query": "公司地址在哪里？",
+    "expectedKeywords": ["地址", "楼层", "大厦"],
+    "intent": "simple",
+    "category": "general",
+    "enabled": true
+  },
+  {
+    "id": "case-025",
+    "query": "如何报销差旅费？",
+    "expectedKeywords": ["差旅", "报销", "发票"],
+    "intent": "complex",
+    "category": "finance",
+    "enabled": true
+  },
+  {
+    "id": "case-026",
+    "query": "试用期多久？",
+    "expectedKeywords": ["试用期", "个月"],
+    "intent": "simple",
+    "category": "hr_policy",
+    "enabled": true
+  },
+  {
+    "id": "case-027",
+    "query": "公章使用流程",
+    "expectedKeywords": ["公章", "用印", "申请"],
+    "intent": "complex",
+    "category": "admin",
+    "enabled": true
+  },
+  {
+    "id": "case-028",
+    "query": "团建活动怎么组织？",
+    "expectedKeywords": ["团建", "活动", "预算", "审批"],
+    "intent": "complex",
+    "category": "hr_development",
+    "enabled": true
+  },
+  {
+    "id": "case-029",
+    "query": "VPN 怎么连？",
+    "expectedKeywords": ["VPN", "连接", "远程"],
+    "intent": "simple",
+    "category": "it",
+    "enabled": true
+  },
+  {
+    "id": "case-030",
+    "query": "员工福利有哪些？",
+    "expectedKeywords": ["福利", "补贴", "体检", "旅游"],
+    "intent": "simple",
+    "category": "hr_policy",
+    "enabled": true
+  }
+]

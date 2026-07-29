@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { PostgresModule } from './database/postgres/postgres.module';
+import { DocumentModule } from './modules/document/document.module';
 
 /**
  * 应用根模块
@@ -12,6 +14,10 @@ import { ConfigModule } from '@nestjs/config';
       isGlobal: true,
       envFilePath: '.env',
     }),
+    // PostgreSQL 数据库连接（pgvector），全局可用
+    PostgresModule,
+    // 文档管理模块（注册 Document 实体）
+    DocumentModule,
   ],
 })
 export class AppModule {}

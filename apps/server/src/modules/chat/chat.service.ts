@@ -18,7 +18,7 @@ export class ChatService {
     @InjectRepository(Message) private msgRepo: Repository<Message>,
   ) {}
 
-  async *streamAnswer(message: string, userId: string, sessionId: string) {
+  async *streamAnswer(message: string, userId: string, sessionId: string, conversationId?: string) {
     // 检测"记住xxx"模式 → 写入 Mem0 明确记忆
     if (/^(记住|请记住|帮我记住)/.test(message)) {
       const fact = message.replace(/^(记住|请记住|帮我记住)[，,：:\s]*/, '');
@@ -30,6 +30,16 @@ export class ChatService {
 
     // 记录用户消息到 Redis
     await this.memory.onMessage(sessionId, userId, 'user', message);
+
+    // 自动创建对话（不阻塞流：启动异步 Promise，流结束后再 await）
+    let resolvedConvId = conversationId;
+    const convPromise = (async () => {
+      if (!resolvedConvId) {
+        const title = message.length > 30 ? message.slice(0, 30) + '…' : message;
+        const conv = await this.createConversation(userId, title);
+        resolvedConvId = conv.id;
+      }
+    })();
 
     // 流式 RAG 回答
     const traceId = this.langfuse.createTrace('chat', { query: message }, userId, sessionId);
@@ -166,6 +176,16 @@ export class ChatService {
     if (fullAnswer) {
       await this.memory.onMessage(sessionId, userId, 'assistant', fullAnswer);
     }
+
+    // 流结束后持久化 user + assistant 消息到 Postgres（不阻塞首 token）
+    await convPromise.catch(() => {});
+    if (resolvedConvId) {
+      await this.saveMessage(resolvedConvId, 'user', message).catch(() => {});
+      if (fullAnswer) {
+        await this.saveMessage(resolvedConvId, 'assistant', fullAnswer).catch(() => {});
+      }
+    }
+
     } finally {
       // flush LangFuse 上报（异常退出时也确保 flush）
       if (traceId) {

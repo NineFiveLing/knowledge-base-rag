@@ -8,4 +8,8 @@ export class ChatDto {
   @IsOptional()
   @IsString()
   sessionId?: string;
+
+  @IsOptional()
+  @IsString()
+  conversationId?: string;
 }

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { RAGService } from '../rag/rag.service';
@@ -10,6 +10,8 @@ import { Message } from './entities/message.entity';
 /** 聊天服务：SSE 流式 + 记忆管理 + "记住xxx"处理 + 对话 CRUD */
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     private rag: RAGService,
     public memory: MemoryService,
@@ -178,11 +180,17 @@ export class ChatService {
     }
 
     // 流结束后持久化 user + assistant 消息到 Postgres（不阻塞首 token）
-    await convPromise.catch(() => {});
+    await convPromise.catch((err) => {
+      this.logger.warn('自动创建对话失败', (err as Error)?.message);
+    });
     if (resolvedConvId) {
-      await this.saveMessage(resolvedConvId, 'user', message).catch(() => {});
+      await this.saveMessage(resolvedConvId, 'user', message).catch((err) => {
+        this.logger.warn('持久化用户消息失败', (err as Error)?.message);
+      });
       if (fullAnswer) {
-        await this.saveMessage(resolvedConvId, 'assistant', fullAnswer).catch(() => {});
+        await this.saveMessage(resolvedConvId, 'assistant', fullAnswer).catch((err) => {
+          this.logger.warn('持久化助手消息失败', (err as Error)?.message);
+        });
       }
     }
 

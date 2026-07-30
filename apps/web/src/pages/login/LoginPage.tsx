@@ -1,50 +1,105 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Card, Tabs, Form, Input, Button, App } from 'antd';
+import { UserOutlined, LockOutlined, IdcardOutlined, TeamOutlined } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/auth.store';
 
-/** 登录页面：支持登录和注册切换 */
+interface LoginForm {
+  username: string;
+  password: string;
+}
+
+interface RegisterForm {
+  username: string;
+  password: string;
+  real_name: string;
+  dept_id: string;
+}
+
 export default function LoginPage() {
-  const [isLogin, setIsLogin] = useState(true);
-  const [form, setForm] = useState({ username: '', password: '', real_name: '', dept_id: '' });
-  const [error, setError] = useState('');
+  const [tab, setTab] = useState<'login' | 'register'>('login');
+  const [loading, setLoading] = useState(false);
   const { login, register } = useAuthStore();
   const navigate = useNavigate();
+  const { message } = App.useApp();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
+  const handleLogin = async (values: LoginForm) => {
+    setLoading(true);
     try {
-      if (isLogin) {
-        await login(form.username, form.password);
-        navigate('/');
-      } else {
-        await register(form);
-        setIsLogin(true);
-        setError('注册成功，请登录');
-      }
+      await login(values.username, values.password);
+      navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.message || '操作失败');
+      message.error(err.response?.data?.message || '登录失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRegister = async (values: RegisterForm) => {
+    setLoading(true);
+    try {
+      await register(values);
+      message.success('注册成功，请登录');
+      setTab('login');
+    } catch (err: any) {
+      message.error(err.response?.data?.message || '注册失败');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="login-page">
-      <form onSubmit={handleSubmit} className="login-form">
-        <h1>📚 企业知识库 RAG 平台</h1>
-        {error && <div className="error-msg">{error}</div>}
-        <input placeholder="用户名" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} required />
-        <input type="password" placeholder="密码" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
-        {!isLogin && (
-          <>
-            <input placeholder="真实姓名" value={form.real_name} onChange={(e) => setForm({ ...form, real_name: e.target.value })} required />
-            <input placeholder="部门 ID" value={form.dept_id} onChange={(e) => setForm({ ...form, dept_id: e.target.value })} required />
-          </>
-        )}
-        <button type="submit">{isLogin ? '登录' : '注册'}</button>
-        <p className="toggle" onClick={() => setIsLogin(!isLogin)}>
-          {isLogin ? '没有账号？去注册' : '已有账号？去登录'}
-        </p>
-      </form>
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
+      <Card style={{ width: 400, borderRadius: 8 }}>
+        <h1 style={{ textAlign: 'center', marginBottom: 20, fontSize: 22 }}>📚 企业知识库 RAG 平台</h1>
+        <Tabs
+          activeKey={tab}
+          onChange={(k) => setTab(k as 'login' | 'register')}
+          centered
+          items={[
+            {
+              key: 'login',
+              label: '登录',
+              children: (
+                <Form<LoginForm> onFinish={handleLogin} size="large">
+                  <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
+                    <Input prefix={<UserOutlined />} placeholder="用户名" />
+                  </Form.Item>
+                  <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
+                    <Input.Password prefix={<LockOutlined />} placeholder="密码" />
+                  </Form.Item>
+                  <Form.Item>
+                    <Button type="primary" htmlType="submit" loading={loading} block>登录</Button>
+                  </Form.Item>
+                </Form>
+              ),
+            },
+            {
+              key: 'register',
+              label: '注册',
+              children: (
+                <Form<RegisterForm> onFinish={handleRegister} size="large">
+                  <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
+                    <Input prefix={<UserOutlined />} placeholder="用户名" />
+                  </Form.Item>
+                  <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
+                    <Input.Password prefix={<LockOutlined />} placeholder="密码" />
+                  </Form.Item>
+                  <Form.Item name="real_name" rules={[{ required: true, message: '请输入真实姓名' }]}>
+                    <Input prefix={<IdcardOutlined />} placeholder="真实姓名" />
+                  </Form.Item>
+                  <Form.Item name="dept_id" rules={[{ required: true, message: '请输入部门 ID' }]}>
+                    <Input prefix={<TeamOutlined />} placeholder="部门 ID" />
+                  </Form.Item>
+                  <Form.Item>
+                    <Button type="primary" htmlType="submit" loading={loading} block>注册</Button>
+                  </Form.Item>
+                </Form>
+              ),
+            },
+          ]}
+        />
+      </Card>
     </div>
   );
 }

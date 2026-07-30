@@ -55,3 +55,28 @@ body,
 .voice-btn {
   margin: 0 6px;
 }
+
+.chat-empty-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #999;
+  text-align: center;
+  padding: 48px 24px;
+}
+.chat-empty-hint .chat-empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+.chat-empty-hint h3 {
+  font-size: 18px;
+  color: #666;
+  margin: 0 0 8px 0;
+}
+.chat-empty-hint p {
+  font-size: 14px;
+  color: #999;
+  margin: 0;
+}

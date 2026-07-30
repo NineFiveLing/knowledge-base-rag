@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Input, Button, Tag, Spin } from 'antd';
+import { Input, Button, Tag } from 'antd';
 import { SendOutlined } from '@ant-design/icons';
 import { useSSE } from '../../hooks/useSSE';
 import { useVoiceChat } from '../../hooks/useVoiceChat';
@@ -56,7 +56,13 @@ export default function ChatPage() {
         {messages.map((m, i) => (
           <div key={i} className={`chat-bubble ${m.role}`}>{m.content}</div>
         ))}
-        {!streaming && messages.length === 0 && <Spin style={{ display: 'block', margin: '12px 0' }} />}
+        {!streaming && messages.length === 0 && (
+          <div className="chat-empty-hint">
+            <div className="chat-empty-icon">💬</div>
+            <h3>AI 知识库问答</h3>
+            <p>输入您的问题，我将从知识库中检索答案</p>
+          </div>
+        )}
         {streaming && <div className="chat-bubble assistant streaming">{streaming}</div>}
       </div>
       {sources.length > 0 && (

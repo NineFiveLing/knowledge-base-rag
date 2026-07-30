@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Upload, Card, Progress, Button, App } from 'antd';
+import { Upload, Card, Progress, Button, Breadcrumb, App } from 'antd';
 import { InboxOutlined, UploadOutlined } from '@ant-design/icons';
+import { Link } from 'react-router-dom';
 import type { UploadFile } from 'antd/es/upload/interface';
 import api from '../../services/api';
 
@@ -40,6 +41,12 @@ export default function DocumentUploadPage() {
 
   return (
     <div>
+      <Breadcrumb style={{ marginBottom: 16 }}
+        items={[
+          { title: <Link to="/documents/manage">文档管理</Link> },
+          { title: '上传文档' },
+        ]}
+      />
       <h2 style={{ marginBottom: 16, fontSize: 20 }}>📄 上传文档</h2>
       <Card>
         <Dragger

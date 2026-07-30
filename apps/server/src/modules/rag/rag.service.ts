@@ -41,7 +41,8 @@ export class RAGService implements OnModuleInit {
     });
 
     this.embeddings = new OpenAIEmbeddings({
-      apiKey,
+      modelName: config.get("EMBEDDING_MODEL") || "text-embedding-v2",
+      openAIApiKey: apiKey,
       configuration: { baseURL },
     });
   }
@@ -53,7 +54,7 @@ export class RAGService implements OnModuleInit {
           .hybridSearch(
             q,
             await this.embed(q),
-            {},
+            undefined,
             { useES: false, useNeo4j: false },
           )
           .then((r) => r.slice(0, 5)),
@@ -62,14 +63,14 @@ export class RAGService implements OnModuleInit {
     const esTool = createESSearchTool(async (q) =>
       JSON.stringify(
         await this.search
-          .hybridSearch(q, [], {}, { useES: true, useNeo4j: false })
+          .hybridSearch(q, [], undefined, { useES: true, useNeo4j: false })
           .then((r) => r.slice(0, 5)),
       ),
     );
     const neo4jTool = createNeo4jQueryTool(async (entity) =>
       JSON.stringify(
         await this.search
-          .hybridSearch(entity, [], {}, { useES: false, useNeo4j: true })
+          .hybridSearch(entity, [], undefined, { useES: false, useNeo4j: true })
           .then((r) => r.slice(0, 5)),
       ),
     );
@@ -99,7 +100,7 @@ export class RAGService implements OnModuleInit {
               .hybridSearch(
                 q,
                 await this.embed(q),
-                {},
+                undefined,
                 { useES: false, useNeo4j: false },
               )
               .then((r) => r.slice(0, 5)),
@@ -107,13 +108,13 @@ export class RAGService implements OnModuleInit {
         async (q) =>
           JSON.stringify(
             await this.search
-              .hybridSearch(q, [], {}, { useES: true, useNeo4j: false })
+              .hybridSearch(q, [], undefined, { useES: true, useNeo4j: false })
               .then((r) => r.slice(0, 5)),
           ),
         async (q) =>
           JSON.stringify(
             await this.search
-              .hybridSearch(q, [], {}, { useES: false, useNeo4j: true })
+              .hybridSearch(q, [], undefined, { useES: false, useNeo4j: true })
               .then((r) => r.slice(0, 5)),
           ),
         this.langfuse,
@@ -136,7 +137,7 @@ export class RAGService implements OnModuleInit {
     const result = await this.search.searchWithThreshold(
       query,
       emb,
-      {},
+      undefined,
       { useES: false, useNeo4j: false },
     );
 

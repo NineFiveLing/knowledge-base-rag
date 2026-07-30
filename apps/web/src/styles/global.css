@@ -8,7 +8,9 @@
 }
 html,
 body,
-#root {
+#root,
+.ant-app,
+.app {
   height: 100%;
   font-size: 14px;
 }
@@ -44,4 +46,12 @@ body,
 }
 .chat-bubble.streaming {
   border-left: 3px solid #667eea;
+}
+
+.chat-input-area {
+  display: flex;
+}
+
+.voice-btn {
+  margin: 0 6px;
 }

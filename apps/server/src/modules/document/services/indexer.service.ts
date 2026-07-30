@@ -44,7 +44,8 @@ export class IndexerService {
   /** 执行阶段二索引 */
   async indexDocument(postgresDocId: string) {
     const doc = await this.docRepo.findOne({ where: { id: postgresDocId } });
-    if (!doc || doc.status !== DocumentStatus.PARSED) return;
+    // 允许 PARSED 或 INDEXING（崩溃恢复）状态执行索引
+    if (!doc || (doc.status !== DocumentStatus.PARSED && doc.status !== DocumentStatus.INDEXING)) return;
 
     doc.status = DocumentStatus.INDEXING;
     await this.docRepo.save(doc);
@@ -67,7 +68,8 @@ export class IndexerService {
       doc.status = DocumentStatus.INDEXED;
       await this.docRepo.save(doc);
     } catch (error) {
-      doc.status = DocumentStatus.FAILED;
+      // 重置为 PARSED 以允许 BullMQ 重试
+      doc.status = DocumentStatus.PARSED;
       await this.docRepo.save(doc);
       throw error;
     }

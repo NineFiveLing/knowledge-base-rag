@@ -3,6 +3,8 @@ import {
   S3Client,
   PutObjectCommand,
   DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import { ConfigService } from '@nestjs/config';
 import { v4 as uuid } from 'uuid';
@@ -14,7 +16,7 @@ import { v4 as uuid } from 'uuid';
 @Injectable()
 export class RustFSService {
   private s3: S3Client;
-  private bucket = 'knowledge-base';
+  private bucket = 'knowledge-rag';
 
   constructor(private config: ConfigService) {
     this.s3 = new S3Client({
@@ -54,5 +56,28 @@ export class RustFSService {
         new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
       );
     }
+  }
+
+  /** 从 RustFS 获取文件可读流（用于查看/下载原文件） */
+  async getFileStream(fileUrl: string): Promise<import('stream').Readable> {
+    const key = fileUrl.split(`${this.bucket}/`)[1];
+    if (!key) throw new Error(`无法解析 RustFS key: ${fileUrl}`);
+    const response = await this.s3.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+    );
+    return response.Body as import('stream').Readable;
+  }
+
+  /** 获取 RustFS 文件元信息（ContentType / ContentLength） */
+  async headFile(fileUrl: string) {
+    const key = fileUrl.split(`${this.bucket}/`)[1];
+    if (!key) throw new Error(`无法解析 RustFS key: ${fileUrl}`);
+    const response = await this.s3.send(
+      new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
+    );
+    return {
+      contentLength: response.ContentLength ?? 0,
+      contentType: response.ContentType ?? 'application/octet-stream',
+    };
   }
 }

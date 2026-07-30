@@ -70,11 +70,11 @@ export class AuthService {
   /** 查询用户所有角色聚合的权限码列表 */
   private async getUserPermissions(userId: string): Promise<string[]> {
     const result = await this.dataSource.query(`
-      SELECT DISTINCT p.code
+      SELECT DISTINCT CONCAT(p.resource, ':', p.action) AS code
       FROM permissions p
-      JOIN role_permissions rp ON p.id = rp.permission_id
-      JOIN user_roles ur ON rp.role_id = ur.role_id
-      WHERE ur.user_id = $1
+      JOIN role_permissions rp ON p.id = rp."permissionsId"
+      JOIN user_roles ur ON rp."rolesId" = ur."rolesId"
+      WHERE ur."usersId" = $1
     `, [userId]);
     return result.map((r: any) => r.code);
   }

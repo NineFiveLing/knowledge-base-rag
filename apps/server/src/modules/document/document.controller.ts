@@ -1,17 +1,23 @@
 import {
-  Controller, Post, Get, Delete, Param, Query, UseGuards,
-  UseInterceptors, UploadedFile, Body,
+  Controller, Post, Get, Delete, Patch, Param, Query, UseGuards,
+  UseInterceptors, UploadedFile, Body, Res, StreamableFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { DocumentService } from './document.service';
 import { ListDocumentDto } from './dto/list-document.dto';
+import { UpdateDocumentDto } from './dto/update-document.dto';
+import { RustFSService } from '../../database/rustfs/rustfs.service';
 
 /** 文档管理控制器 */
 @Controller('documents')
 export class DocumentController {
-  constructor(private docService: DocumentService) {}
+  constructor(
+    private docService: DocumentService,
+    private rustfs: RustFSService,
+  ) {}
 
   /** 上传文档（阶段一：同步解析） */
   @Post('upload')
@@ -39,7 +45,33 @@ export class DocumentController {
   @Get(':id')
   @UseGuards(JwtAuthGuard)
   async detail(@Param('id') id: string) {
-    return { id };
+    const doc = await this.docService.findById(id);
+    return {
+      id: doc.id,
+      name: doc.name,
+      type: doc.type,
+      size: doc.size,
+      version: doc.version,
+      status: doc.status,
+      visibility: doc.visibility,
+      uploader_id: doc.uploader_id,
+      dept_id: doc.dept_id,
+      mongo_doc_id: doc.mongo_doc_id,
+      rustfs_file_url: doc.rustfs_file_url,
+      created_at: doc.created_at,
+      updated_at: doc.updated_at,
+    };
+  }
+
+  /** 编辑文档元信息 */
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateDocumentDto,
+    @CurrentUser() user: { id: string; roles?: string[] },
+  ) {
+    return this.docService.updateDocument(id, dto, user);
   }
 
   /** 手动触发阶段二索引 */
@@ -52,6 +84,28 @@ export class DocumentController {
     return this.docService.triggerIndex(id, user.id);
   }
 
+  /** 替换文件（归档旧版本 → 解析新文件 → 重建索引） */
+  @Post(':id/replace')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(FileInterceptor('file'))
+  async replaceFile(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: { id: string; roles?: string[] },
+  ) {
+    return this.docService.replaceFile(id, file, user);
+  }
+
+  /** 取消上传 */
+  @Post(':id/cancel')
+  @UseGuards(JwtAuthGuard)
+  async cancel(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.docService.cancelUpload(id, user.id);
+  }
+
   /** 删除文档（级联清理所有索引和存储） */
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
@@ -61,6 +115,74 @@ export class DocumentController {
   ) {
     await this.docService.deleteDocument(id, user.id);
     return { success: true };
+  }
+
+  /** 查看历史版本文件 — 必须在 :id/file 之前注册，避免 :id 匹配 'versions' */
+  @Get('versions/:versionId/file')
+  @UseGuards(JwtAuthGuard)
+  async viewVersionFile(
+    @Param('versionId') versionId: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { stream, filename, contentType } = await this.docService.getVersionFile(versionId);
+    res.set({
+      'Content-Type': contentType,
+      'Content-Disposition': `inline; filename="${encodeURIComponent(filename)}"`,
+    });
+    return new StreamableFile(stream);
+  }
+
+  /** 版本历史列表 */
+  @Get(':id/versions')
+  @UseGuards(JwtAuthGuard)
+  async listVersions(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string; dept_id: string },
+  ) {
+    await this.docService.checkViewAccess(id, user);
+    return this.docService.getVersions(id);
+  }
+
+  /** 查看原文件（浏览器内预览） */
+  @Get(':id/file')
+  @UseGuards(JwtAuthGuard)
+  async viewFile(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string; dept_id: string },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const doc = await this.docService.checkViewAccess(id, user);
+    const meta = await this.rustfs.headFile(doc.rustfs_file_url);
+    const stream = await this.rustfs.getFileStream(doc.rustfs_file_url);
+
+    res.set({
+      'Content-Type': meta.contentType,
+      'Content-Disposition': `inline; filename="${encodeURIComponent(doc.name)}"`,
+      'Content-Length': meta.contentLength.toString(),
+    });
+
+    return new StreamableFile(stream);
+  }
+
+  /** 下载原文件（强制浏览器下载） */
+  @Get(':id/download')
+  @UseGuards(JwtAuthGuard)
+  async downloadFile(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string; dept_id: string },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const doc = await this.docService.checkViewAccess(id, user);
+    const meta = await this.rustfs.headFile(doc.rustfs_file_url);
+    const stream = await this.rustfs.getFileStream(doc.rustfs_file_url);
+
+    res.set({
+      'Content-Type': meta.contentType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(doc.name)}"`,
+      'Content-Length': meta.contentLength.toString(),
+    });
+
+    return new StreamableFile(stream);
   }
 
   /** 预览文档 Markdown 正文 */

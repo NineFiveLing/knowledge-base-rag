@@ -38,10 +38,10 @@ docker compose up -d
 ```bash
 pnpm install
 
-# 后端 (localhost:3000)
+# 后端 (localhost:3001)
 cd apps/server && pnpm dev
 
-# 前端 (localhost:5173)
+# 前端 (localhost:3000)
 cd apps/web && pnpm dev
 ```
 
@@ -49,8 +49,8 @@ cd apps/web && pnpm dev
 
 | 服务 | 地址 |
 |------|------|
-| 前端 | http://localhost:5173 |
-| 后端 API | http://localhost:3000 |
+| 前端 | http://localhost:3000 |
+| 后端 API | http://localhost:3001 |
 | pgAdmin | http://localhost:5050 |
 | Mongo Express | http://localhost:8081 |
 | Kibana | http://localhost:5601 |

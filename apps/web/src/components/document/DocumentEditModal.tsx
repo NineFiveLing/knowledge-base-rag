@@ -1,0 +1,78 @@
+import { Modal, Form, Input, Select, App } from 'antd';
+import { useEffect } from 'react';
+import api from '../../services/api';
+
+interface DocInfo {
+  id: string;
+  name: string;
+  visibility: string;
+  dept_id?: string;
+}
+
+interface Props {
+  open: boolean;
+  document: DocInfo | null;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+export default function DocumentEditModal({ open, document, onClose, onSuccess }: Props) {
+  const [form] = Form.useForm();
+  const { message } = App.useApp();
+
+  useEffect(() => {
+    if (document) {
+      form.setFieldsValue({
+        name: document.name,
+        visibility: document.visibility,
+        dept_id: document.dept_id || '',
+      });
+    }
+  }, [document, form]);
+
+  const handleOk = async () => {
+    const values = await form.validateFields();
+    try {
+      await api.patch(`/documents/${document!.id}`, {
+        name: values.name,
+        visibility: values.visibility,
+        dept_id: values.dept_id || undefined,
+      });
+      message.success('修改成功');
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      message.error(err.response?.data?.message || '修改失败');
+    }
+  };
+
+  return (
+    <Modal
+      title="编辑文档"
+      open={open}
+      onOk={handleOk}
+      onCancel={onClose}
+      okText="保存"
+      cancelText="取消"
+      destroyOnClose
+    >
+      <Form form={form} layout="vertical">
+        <Form.Item name="name" label="文件名" rules={[{ required: true, message: '请输入文件名' }]}>
+          <Input />
+        </Form.Item>
+        <Form.Item name="visibility" label="可见性" rules={[{ required: true }]}>
+          <Select
+            options={[
+              { value: 'public', label: '公开 — 所有人可见' },
+              { value: 'dept', label: '部门 — 仅本部门可见' },
+              { value: 'private', label: '私有 — 仅自己可见' },
+            ]}
+          />
+        </Form.Item>
+        <Form.Item name="dept_id" label="所属部门">
+          <Input placeholder="部门 ID（留空则不修改）" />
+        </Form.Item>
+      </Form>
+    </Modal>
+  );
+}

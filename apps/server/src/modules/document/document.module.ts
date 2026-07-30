@@ -2,6 +2,7 @@ import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
 import { Document } from './entities/document.entity';
+import { DocumentVersion } from './entities/document-version.entity';
 import { DocumentController } from './document.controller';
 import { DocumentService } from './document.service';
 import { PdfParser } from './parsers/pdf.parser';
@@ -18,11 +19,13 @@ import { ChunkerService } from './services/chunker.service';
 import { IndexerService } from './services/indexer.service';
 import { IndexQueueService } from './services/index-queue.service';
 import { IndexWorkerService } from './services/index-worker.service';
+import { MongoDBModule } from '../../database/mongodb/mongodb.module';
 
 /** 文档管理模块：上传、解析、分块、索引全流程 */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Document]),
+    TypeOrmModule.forFeature([Document, DocumentVersion]),
+    MongoDBModule,
     BullModule.registerQueue({
       name: 'document-index',
       defaultJobOptions: {

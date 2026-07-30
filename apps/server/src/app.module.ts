@@ -1,3 +1,4 @@
+import { join } from 'path';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
@@ -23,7 +24,7 @@ import { PermissionGuard } from './common/guards/permission.guard';
 /** 应用根模块 */
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
+    ConfigModule.forRoot({ isGlobal: true, envFilePath: join(__dirname, '..', '..', '..', '.env') }),
     BullModule.forRoot({
       connection: {
         host: process.env.REDIS_HOST || 'localhost',

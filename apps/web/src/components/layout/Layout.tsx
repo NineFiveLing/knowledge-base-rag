@@ -17,7 +17,7 @@ const { Sider, Header, Content } = Layout;
 const menuItems = [
   { key: '/knowledge', icon: <FolderOutlined />, label: '知识库' },
   { key: '/chat', icon: <MessageOutlined />, label: 'AI 问答' },
-  { key: '/documents', icon: <FileTextOutlined />, label: '文档管理' },
+  { key: '/documents/manage', icon: <FileTextOutlined />, label: '文档管理' },
   { key: '/analytics', icon: <BarChartOutlined />, label: '数据统计' },
 ];
 
@@ -26,7 +26,8 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const selectedKey = '/' + location.pathname.split('/')[1];
+  const pathname = location.pathname;
+  const selectedKey = pathname.startsWith('/documents') ? '/documents/manage' : '/' + pathname.split('/')[1];
 
   const isAdmin = user?.roles?.includes('admin') || user?.permissions?.includes('rbac:read');
   const userMenuItems = [

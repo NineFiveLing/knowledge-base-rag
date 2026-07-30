@@ -57,20 +57,24 @@ export class SearchService {
   ): Promise<ScoredResult[]> {
     const { useES = true, useNeo4j = true } = options;
 
-    const fetchers: Promise<ScoredResult[]>[] = [
-      // PGVector：始终启用
-      this.vector
-        .similaritySearch(queryEmbedding, 10, deptFilter)
-        .then((rows) =>
-          rows.map((r: any) => ({
-            chunk_id: r.chunk_id,
-            postgres_doc_id: r.postgres_doc_id,
-            chunk_text: r.chunk_text,
-            score: r.score,
-            source: 'pgvector' as const,
-          })),
-        ),
-    ];
+    const fetchers: Promise<ScoredResult[]>[] = [];
+
+    // PGVector：仅在 embedding 非空时启用（避免空向量错误）
+    if (queryEmbedding && queryEmbedding.length > 0) {
+      fetchers.push(
+        this.vector
+          .similaritySearch(queryEmbedding, 10, deptFilter)
+          .then((rows) =>
+            rows.map((r: any) => ({
+              chunk_id: r.chunk_id,
+              postgres_doc_id: r.postgres_doc_id,
+              chunk_text: r.chunk_text,
+              score: r.score,
+              source: 'pgvector' as const,
+            })),
+          ),
+      );
+    }
 
     // ES：全文检索
     if (useES) {
@@ -136,25 +140,27 @@ export class SearchService {
     // 3. Rerank 精排
     const reranked = await rerank(query, fused, 5);
 
-    const MIN_SCORE = 0.5;
-    const validResults = reranked.filter((r) => r.rerankScore >= MIN_SCORE);
+    const MIN_SCORE = 0.4;
 
     let result: SearchResult;
 
-    if (validResults.length === 0) {
+    if (fused.length === 0) {
+      // 真正无结果：降级
       result = {
         hit: false,
         degraded: true,
-        degradeReason: 'no_result_above_threshold',
+        degradeReason: 'no_result',
         fallbackMessage: '抱歉，未在知识库中找到与您问题相关的文档。请尝试换个问法。',
         message: '抱歉，未找到与该问题相关的文档。请尝试更换关键词或联系相关部门获取帮助。',
         results: [],
       };
     } else {
+      // 保留 Top-K rerank 结果，即使分数低于阈值也交给 LLM 判断
+      const validResults = reranked.filter((r) => r.rerankScore >= MIN_SCORE);
       result = {
-        hit: true,
-        degraded: false,
-        results: validResults.map(({ rerankScore: _, ...rest }) => rest),
+        hit: validResults.length > 0,
+        degraded: false, // 只要有检索结果就不降级，让 LLM 判断
+        results: reranked.slice(0, 5).map(({ rerankScore: _, ...rest }) => rest),
       };
     }
 

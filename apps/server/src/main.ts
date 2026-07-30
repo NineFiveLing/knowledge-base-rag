@@ -15,7 +15,7 @@ async function bootstrap() {
 
   // CORS：允许前端开发服务器跨域访问
   app.enableCors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
     credentials: true,
   });
 
@@ -30,7 +30,7 @@ async function bootstrap() {
     }),
   );
 
-  const port = process.env.SERVER_PORT || 3000;
+  const port = process.env.SERVER_PORT || 3001;
   await app.listen(port);
   console.log(`🚀 知识库后端服务已启动: http://localhost:${port}`);
 }

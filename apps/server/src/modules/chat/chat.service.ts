@@ -73,10 +73,19 @@ export class ChatService {
       pendingBuffer = '';
     };
 
+    // 用于过滤意图分类器泄露的 token（只回复一个词：chat/simple/complex/followup）
+    let intentFilterActive = true;
+    const intentLabels = new Set(['chat', 'simple', 'complex', 'followup']);
+
     for await (const event of stream) {
+      // 流式 token（Agent ReAct 循环中 LLM 流式调用产生）
       if (event.event === 'on_chat_model_stream' && event.data?.chunk?.content) {
         const token = event.data.chunk.content;
         if (typeof token !== 'string') continue;
+
+        // 过滤意图分类器泄露的单标签 token
+        if (intentFilterActive && intentLabels.has(token.trim().toLowerCase())) continue;
+        intentFilterActive = false;
 
         if (sourcesSent) {
           // 来源已发送，直接输出
@@ -98,8 +107,22 @@ export class ChatService {
         }
       }
 
-      if (event.data?.chunk?.finalAnswer) {
-        const answer = String(event.data.chunk.finalAnswer);
+      // 非流式 LLM 调用完成（direct_answer / generate_answer 使用 invoke）
+      if (event.event === 'on_chat_model_end' && event.data?.output?.content) {
+        const text = String(event.data.output.content);
+        if (text && text !== 'chat' && text !== 'simple' && text !== 'complex') {
+          const clean = text.replace(/<!-- SOURCES:.*?-->/, '');
+          if (clean && !fullAnswer.includes(clean)) {
+            fullAnswer = clean;
+            yield { type: 'text', content: clean };
+          }
+        }
+      }
+
+      // 节点输出中的 finalAnswer（direct_answer / generate_answer 的返回值）
+      const output = (event.data as any)?.output;
+      if (output?.finalAnswer && typeof output.finalAnswer === 'string') {
+        const answer = output.finalAnswer;
         // 先清理可能残留的缓冲区
         if (pendingBuffer) {
           pendingBuffer += answer;

@@ -20,7 +20,7 @@ export class AnalyticsService {
       `SELECT COUNT(*)::int as count FROM users`
     );
     const [activeUsers] = await this.dataSource.query(`
-      SELECT COUNT(DISTINCT created_by)::int as count
+      SELECT COUNT(DISTINCT uploader_id)::int as count
       FROM documents WHERE created_at >= NOW() - INTERVAL '7 days'
     `);
 
@@ -68,7 +68,7 @@ export class AnalyticsService {
       `SELECT COUNT(*)::int as count FROM users`
     );
     const [activeUsers] = await this.dataSource.query(`
-      SELECT COUNT(DISTINCT created_by)::int as count
+      SELECT COUNT(DISTINCT uploader_id)::int as count
       FROM documents WHERE created_at >= NOW() - INTERVAL '7 days'
     `);
     return {

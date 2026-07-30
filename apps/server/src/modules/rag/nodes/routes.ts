@@ -4,12 +4,13 @@ import { AgentStateType } from '../state';
 /** 根据意图分类结果路由 */
 export function routeByIntent(state: AgentStateType): string {
   const intent = state.intent || 'simple';
+  // 返回意图分类标签（与 graph.ts 中的 edge map key 匹配）
   switch (intent) {
-    case 'chat': return 'direct_answer';
-    case 'simple': return 'simple_retrieval';
-    case 'complex': return 'agent';
-    case 'followup': return 'agent_followup';
-    default: return 'direct_answer';
+    case 'chat': return 'chat';
+    case 'simple': return 'simple';
+    case 'complex': return 'complex';
+    case 'followup': return 'followup';
+    default: return 'chat';
   }
 }
 

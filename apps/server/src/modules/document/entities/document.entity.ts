@@ -8,6 +8,7 @@ export enum DocumentStatus {
   INDEXING = 'indexing',     // 索引中（阶段二执行中）
   INDEXED = 'indexed',       // 索引完成
   FAILED = 'failed',         // 失败
+  CANCELLED = 'cancelled',   // 用户主动取消上传
 }
 
 /** 文档可见性枚举 */
@@ -63,6 +64,10 @@ export class Document {
   /** 处理状态 */
   @Column({ type: 'enum', enum: DocumentStatus, default: DocumentStatus.UPLOADING })
   status!: DocumentStatus;
+
+  /** 版本号，每次替换文件自增 */
+  @Column({ type: 'int', default: 1 })
+  version!: number;
 
   @CreateDateColumn()
   created_at!: Date;

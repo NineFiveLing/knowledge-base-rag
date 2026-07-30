@@ -4,7 +4,7 @@ import type { EvalCase, EvalResult } from './metrics';
 import { calcAnswerRecall, isPassed } from './metrics';
 import { printReport, printJSONReport } from './report';
 
-const BASE_URL = process.env.API_URL || 'http://localhost:3000/api';
+const BASE_URL = process.env.API_URL || 'http://localhost:3001/api';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 const OUTPUT_JSON = process.env.OUTPUT_JSON === 'true';
 

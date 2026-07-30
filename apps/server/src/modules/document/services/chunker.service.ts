@@ -19,8 +19,8 @@ export interface Chunk {
 @Injectable()
 export class ChunkerService {
   private splitter = new RecursiveCharacterTextSplitter({
-    chunkSize: 800,
-    chunkOverlap: 150,
+    chunkSize: 500,
+    chunkOverlap: 100,
     separators: ['\n## ', '\n### ', '\n#### ', '\n', '。', '.', ' ', ''],
   });
 

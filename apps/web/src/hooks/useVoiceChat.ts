@@ -10,7 +10,7 @@ export function useVoiceChat(_sessionId: string) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 
   const connect = useCallback(() => {
-    const wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:3000';
+    const wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:3001';
     const socket = io(`${wsUrl}/voice`);
     socketRef.current = socket;
 

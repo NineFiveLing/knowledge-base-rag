@@ -59,7 +59,9 @@ export class VectorService implements OnModuleInit {
     topK: number = 10,
     deptFilter?: { deptIds: string[]; includePublic: boolean },
   ) {
-    const params: any[] = [embedding];
+    // 格式化为 PGVector 兼容的向量字符串: [0.1,0.2,...]
+    const vectorStr = `[${embedding.join(',')}]`;
+    const params: any[] = [vectorStr];
     let query = `
       SELECT c.chunk_id, c.postgres_doc_id, c.chunk_text,
              1 - (c.embedding <=> $1::vector) AS similarity
@@ -72,11 +74,13 @@ export class VectorService implements OnModuleInit {
       if (deptFilter.includePublic) {
         conditions.push(`d.visibility = 'public'`);
       }
-      if (deptFilter.deptIds.length > 0) {
+      if (deptFilter.deptIds?.length > 0) {
         params.push(deptFilter.deptIds);
         conditions.push(`d.dept_id = ANY($${params.length}::text[])`);
       }
-      query += ` WHERE (${conditions.join(' OR ')})`;
+      if (conditions.length > 0) {
+        query += ` WHERE (${conditions.join(' OR ')})`;
+      }
     }
 
     params.push(topK);

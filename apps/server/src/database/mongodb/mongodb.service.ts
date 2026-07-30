@@ -42,14 +42,20 @@ export class MongoDBService {
     await this.docMdModel.deleteOne({ postgres_doc_id: postgresDocId });
   }
 
-  /** 更新 Markdown 正文（阶段一回填 postgres_doc_id 时使用） */
+  /** 回填 postgres_doc_id 并更新正文（阶段一完成后使用） */
   async updateMarkdown(
     postgresDocId: string,
     markdown: string,
   ) {
+    // 找到 pending 状态的文档并更新其 postgres_doc_id 和 markdown_content 为实际值
     await this.docMdModel.updateOne(
-      { postgres_doc_id: postgresDocId },
-      { markdown_content: markdown },
+      { postgres_doc_id: 'pending' },
+      { postgres_doc_id: postgresDocId, markdown_content: markdown },
     );
+  }
+
+  /** 清理所有 pending 状态（未完成上传）的残留文档 */
+  async cleanPending(): Promise<void> {
+    await this.docMdModel.deleteMany({ postgres_doc_id: 'pending' });
   }
 }

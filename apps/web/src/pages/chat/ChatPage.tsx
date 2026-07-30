@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
+import { Input, Button, Tag } from 'antd';
+import { SendOutlined } from '@ant-design/icons';
 import { useSSE } from '../../hooks/useSSE';
 import { useVoiceChat } from '../../hooks/useVoiceChat';
 import VoiceButton from '../../components/chat/VoiceButton';
@@ -57,21 +59,35 @@ export default function ChatPage() {
         {streaming && <div className="chat-bubble assistant streaming">{streaming}</div>}
       </div>
       {sources.length > 0 && (
-        <div className="sources-bar">
-          <span className="sources-label">参考来源：</span>
+        <div style={{ marginBottom: 8 }}>
+          <span style={{ marginRight: 8, color: '#666', fontSize: 13 }}>参考来源：</span>
           {sources.map((s) => (
-            <span key={s.index} className="source-tag" title={`文档: ${s.docId} | 片段: ${s.chunkId}`}>
+            <Tag key={s.index} color="blue" title={`文档: ${s.docId} | 片段: ${s.chunkId}`}>
               [{s.index}]
-            </span>
+            </Tag>
           ))}
         </div>
       )}
       <div className="chat-input-area">
-        <input value={input} onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder="输入您的问题..." disabled={!!streaming} />
+        <Input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onPressEnter={() => handleSend()}
+          placeholder="输入您的问题..."
+          disabled={!!streaming}
+          size="large"
+          style={{ flex: 1 }}
+        />
         <VoiceButton isRecording={isRecording} onStart={startRecording} onStop={stopRecording} />
-        <button onClick={() => handleSend()} disabled={!!streaming}>发送</button>
+        <Button
+          type="primary"
+          icon={<SendOutlined />}
+          onClick={() => handleSend()}
+          disabled={!!streaming}
+          size="large"
+        >
+          发送
+        </Button>
       </div>
       {asrText && <div className="asr-preview">{asrText}</div>}
     </div>

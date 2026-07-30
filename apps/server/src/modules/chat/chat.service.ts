@@ -1,15 +1,21 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { RAGService } from '../rag/rag.service';
 import { MemoryService } from '../memory/memory.service';
 import { LangfuseService } from '../../common/observability/langfuse.service';
+import { Conversation } from './entities/conversation.entity';
+import { Message } from './entities/message.entity';
 
-/** 聊天服务：SSE 流式 + 记忆管理 + "记住xxx"处理 */
+/** 聊天服务：SSE 流式 + 记忆管理 + "记住xxx"处理 + 对话 CRUD */
 @Injectable()
 export class ChatService {
   constructor(
     private rag: RAGService,
     public memory: MemoryService,
     private langfuse: LangfuseService,
+    @InjectRepository(Conversation) private convRepo: Repository<Conversation>,
+    @InjectRepository(Message) private msgRepo: Repository<Message>,
   ) {}
 
   async *streamAnswer(message: string, userId: string, sessionId: string) {
@@ -166,5 +172,62 @@ export class ChatService {
         await this.langfuse.flush();
       }
     }
+  }
+
+  /** 新建对话 */
+  async createConversation(userId: string, title?: string) {
+    const conv = this.convRepo.create({ user_id: userId, title: title || '新对话' });
+    return this.convRepo.save(conv);
+  }
+
+  /** 当前用户的对话列表 */
+  async listConversations(userId: string, page = 1, pageSize = 20) {
+    const [items, total] = await this.convRepo.findAndCount({
+      where: { user_id: userId },
+      order: { updated_at: 'DESC' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    });
+    return { items, total, page, pageSize };
+  }
+
+  /** 获取对话消息列表 */
+  async getMessages(conversationId: string, userId: string) {
+    const conv = await this.convRepo.findOne({ where: { id: conversationId, user_id: userId } });
+    if (!conv) throw new Error('对话不存在');
+    const messages = await this.msgRepo.find({
+      where: { conversation_id: conversationId },
+      order: { created_at: 'ASC' },
+    });
+    return { conversation: conv, messages };
+  }
+
+  /** 删除对话（级联删除关联消息） */
+  async deleteConversation(conversationId: string, userId: string) {
+    const conv = await this.convRepo.findOne({ where: { id: conversationId, user_id: userId } });
+    if (!conv) throw new Error('对话不存在');
+    await this.convRepo.remove(conv);
+    return { success: true };
+  }
+
+  /** 编辑对话标题 */
+  async updateConversation(conversationId: string, userId: string, title: string) {
+    const conv = await this.convRepo.findOne({ where: { id: conversationId, user_id: userId } });
+    if (!conv) throw new Error('对话不存在');
+    conv.title = title;
+    return this.convRepo.save(conv);
+  }
+
+  /** 持久化一条消息 */
+  async saveMessage(
+    conversationId: string,
+    role: 'user' | 'assistant' | 'system',
+    content: string,
+    sources?: Array<{ index: number; docId: string; chunkId: string }>,
+  ) {
+    const msg = this.msgRepo.create({ conversation_id: conversationId, role, content, sources });
+    // 更新对话的 updated_at
+    await this.convRepo.update(conversationId, { updated_at: new Date() });
+    return this.msgRepo.save(msg);
   }
 }

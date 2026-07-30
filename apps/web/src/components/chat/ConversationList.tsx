@@ -35,6 +35,13 @@ export default function ConversationList({ activeId, onSelect }: Props) {
     fetchList();
   }, []);
 
+  /** 监听外部刷新事件（例如新对话自动创建后） */
+  useEffect(() => {
+    const handler = () => { fetchList(); };
+    window.addEventListener('refresh-conversations', handler);
+    return () => { window.removeEventListener('refresh-conversations', handler); };
+  }, []);
+
   const handleNew = async () => {
     const res = await api.post('/chat/conversations', { title: '新对话' });
     const conv = res.data;

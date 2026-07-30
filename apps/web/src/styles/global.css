@@ -80,3 +80,41 @@ body,
   color: #999;
   margin: 0;
 }
+
+/* === 对话布局（左侧列表 + 右侧聊天） === */
+.chat-layout {
+  display: flex;
+  height: calc(100vh - 64px);
+  overflow: hidden;
+}
+.chat-sidebar {
+  width: 260px;
+  min-width: 260px;
+  border-right: 1px solid #f0f0f0;
+  overflow-y: auto;
+  background: #fafafa;
+}
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+/* === 对话列表（在 ConversationList 组件中使用） === */
+.conversation-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.conversation-item {
+  cursor: pointer;
+  padding: 8px 12px !important;
+  border-bottom: 1px solid #f5f5f5;
+}
+.conversation-item:hover { background: #e6f7ff; }
+.conversation-item.active { background: #bae7ff; }

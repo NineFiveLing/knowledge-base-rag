@@ -9,12 +9,16 @@ export function useSSE() {
       onToken: (token: string) => void,
       onDone: () => void,
       onSources?: (sources: Array<{ index: number; docId: string; chunkId: string }>) => void,
+      conversationId?: string | null,
     ) => {
       const token = localStorage.getItem('access_token');
+      const body: any = { message, sessionId };
+      if (conversationId) body.conversationId = conversationId;
+
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ message, sessionId }),
+        body: JSON.stringify(body),
       });
 
       const reader = response.body!.getReader();

@@ -1,5 +1,5 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Button, Avatar, Dropdown, Space } from 'antd';
+import { Layout, Menu, Avatar, Dropdown, Space } from 'antd';
 import {
   FolderOutlined,
   MessageOutlined,
@@ -28,10 +28,13 @@ export default function AppLayout() {
 
   const selectedKey = '/' + location.pathname.split('/')[1];
 
+  const isAdmin = user?.roles?.includes('admin') || user?.permissions?.includes('rbac:read');
   const userMenuItems = [
     { key: 'info', label: <span>{user?.real_name || user?.username}</span>, disabled: true },
     { type: 'divider' as const },
-    { key: 'roles', icon: <SettingOutlined />, label: '角色管理' },
+    ...(isAdmin
+      ? [{ key: 'roles' as const, icon: <SettingOutlined />, label: '角色管理' }]
+      : []),
     { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
   ];
 

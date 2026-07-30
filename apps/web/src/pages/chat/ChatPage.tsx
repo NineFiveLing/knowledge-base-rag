@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Input, Button, Tag } from 'antd';
+import { Input, Button, Tag, Spin } from 'antd';
 import { SendOutlined } from '@ant-design/icons';
 import { useSSE } from '../../hooks/useSSE';
 import { useVoiceChat } from '../../hooks/useVoiceChat';
@@ -56,6 +56,7 @@ export default function ChatPage() {
         {messages.map((m, i) => (
           <div key={i} className={`chat-bubble ${m.role}`}>{m.content}</div>
         ))}
+        {!streaming && messages.length === 0 && <Spin style={{ display: 'block', margin: '12px 0' }} />}
         {streaming && <div className="chat-bubble assistant streaming">{streaming}</div>}
       </div>
       {sources.length > 0 && (

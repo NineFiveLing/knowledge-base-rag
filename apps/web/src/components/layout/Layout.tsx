@@ -1,50 +1,103 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { Layout, Menu, Button, Avatar, Dropdown, Space } from 'antd';
+import {
+  FolderOutlined,
+  MessageOutlined,
+  FileTextOutlined,
+  BarChartOutlined,
+  SettingOutlined,
+  LogoutOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { useAuthStore } from '../../stores/auth.store';
 import Can from '../common/Can';
 
-/** 主布局：侧边栏导航 + 顶栏用户信息 + 内容区 */
-export default function Layout() {
+const { Sider, Header, Content } = Layout;
+
+const menuItems = [
+  { key: '/knowledge', icon: <FolderOutlined />, label: '知识库' },
+  { key: '/chat', icon: <MessageOutlined />, label: 'AI 问答' },
+  { key: '/documents', icon: <FileTextOutlined />, label: '文档管理' },
+  { key: '/analytics', icon: <BarChartOutlined />, label: '数据统计' },
+];
+
+export default function AppLayout() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const navItems = [
-    { path: '/knowledge', label: '📁 知识库', icon: '📁' },
-    { path: '/chat', label: '💬 AI 问答', icon: '💬' },
-    { path: '/documents', label: '📄 文档管理', icon: '📄' },
+  const selectedKey = '/' + location.pathname.split('/')[1];
+
+  const userMenuItems = [
+    { key: 'info', label: <span>{user?.real_name || user?.username}</span>, disabled: true },
+    { type: 'divider' as const },
+    { key: 'roles', icon: <SettingOutlined />, label: '角色管理' },
+    { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
   ];
 
+  const handleUserMenu = ({ key }: { key: string }) => {
+    if (key === 'logout') logout();
+    if (key === 'roles') navigate('/admin/roles');
+  };
+
   return (
-    <div className="layout">
-      <aside className="sidebar">
-        <h2>企业知识库</h2>
-        <nav>
-          {navItems.map((item) => (
-            <a key={item.path} className={location.pathname.startsWith(item.path) ? 'active' : ''} onClick={() => navigate(item.path)}>
-              {item.icon} {item.label}
-            </a>
-          ))}
-          {/* 数据统计 */}
-          <a className={location.pathname.startsWith('/analytics') ? 'active' : ''} onClick={() => navigate('/analytics')}>
-            📊 数据统计
-          </a>
-          {/* 系统管理（仅拥有 rbac:read 权限或 admin 角色可见） */}
+    <Layout style={{ height: '100%' }}>
+      <Sider width={220} theme="dark">
+        <div
+          style={{
+            height: 48,
+            display: 'flex',
+            alignItems: 'center',
+            paddingLeft: 20,
+            color: '#fff',
+            fontSize: 16,
+            fontWeight: 600,
+          }}
+        >
+          📚 企业知识库
+        </div>
+        <Menu
+          theme="dark"
+          mode="inline"
+          selectedKeys={[selectedKey]}
+          items={menuItems}
+          onClick={({ key }) => navigate(key)}
+        />
+        {/* 角色管理入口：仅管理员可见 */}
+        <div style={{ padding: '0 24px', marginTop: 8 }}>
           <Can permission="rbac:read">
-            <a className={location.pathname.startsWith('/admin') ? 'active' : ''} onClick={() => navigate('/admin/roles')}>
-              🔑 角色管理
-            </a>
+            <Menu
+              theme="dark"
+              mode="inline"
+              selectable={false}
+              items={[{ key: '/admin/roles', icon: <SettingOutlined />, label: '角色管理' }]}
+              onClick={({ key }) => navigate(key)}
+            />
           </Can>
-        </nav>
-      </aside>
-      <div className="main-area">
-        <header className="topbar">
-          <span>👤 {user?.real_name || user?.username}</span>
-          <button onClick={logout}>退出</button>
-        </header>
-        <main className="content">
+        </div>
+      </Sider>
+      <Layout>
+        <Header
+          style={{
+            background: '#fff',
+            padding: '0 20px',
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            borderBottom: '1px solid #f0f0f0',
+          }}
+        >
+          <Dropdown menu={{ items: userMenuItems, onClick: handleUserMenu }}>
+            <Space style={{ cursor: 'pointer' }}>
+              <Avatar size="small" icon={<UserOutlined />} />
+              <span>{user?.real_name || user?.username}</span>
+            </Space>
+          </Dropdown>
+        </Header>
+        <Content style={{ padding: 20, overflow: 'auto' }}>
           <Outlet />
-        </main>
-      </div>
-    </div>
+        </Content>
+      </Layout>
+    </Layout>
   );
 }

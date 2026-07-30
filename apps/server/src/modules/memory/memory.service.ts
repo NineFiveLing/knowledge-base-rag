@@ -1,8 +1,8 @@
-import { Injectable } from '@nestjs/common';
-import { RedisMemoryAdapter } from './adapters/redis.adapter';
-import { Mem0Adapter } from './adapters/mem0.adapter';
-import { ChatOpenAI } from '@langchain/openai';
-import { ConfigService } from '@nestjs/config';
+import { Injectable } from "@nestjs/common";
+import { RedisMemoryAdapter } from "./adapters/redis.adapter";
+import { Mem0Adapter } from "./adapters/mem0.adapter";
+import { ChatOpenAI } from "@langchain/openai";
+import { ConfigService } from "@nestjs/config";
 
 /** 统一记忆服务：协调 Redis 短期记忆 + Mem0 长期记忆 */
 @Injectable()
@@ -15,9 +15,9 @@ export class MemoryService {
     private config: ConfigService,
   ) {
     this.llm = new ChatOpenAI({
-      model: 'deepseek-chat',
-      apiKey: config.get('DEEPSEEK_API_KEY'),
-      configuration: { baseURL: config.get('DEEPSEEK_BASE_URL') },
+      model: config.get("MODEL_NAME"),
+      apiKey: config.get("ALIYUN_API_KEY"),
+      configuration: { baseURL: config.get("ALIYUN_BASE_URL") },
     });
   }
 
@@ -28,8 +28,8 @@ export class MemoryService {
       this.mem0.getUserContext(userId),
     ]);
 
-    const historyStr = history.map((m) => `${m.role}: ${m.content}`).join('\n');
-    const systemContext = userContext ? `\n## 用户背景\n${userContext}\n` : '';
+    const historyStr = history.map((m) => `${m.role}: ${m.content}`).join("\n");
+    const systemContext = userContext ? `\n## 用户背景\n${userContext}\n` : "";
 
     return {
       history: historyStr.slice(-4096),
@@ -41,7 +41,7 @@ export class MemoryService {
   async onMessage(
     sessionId: string,
     userId: string,
-    role: 'user' | 'assistant',
+    role: "user" | "assistant",
     content: string,
   ) {
     await this.redis.appendMessage(sessionId, { role, content });
@@ -54,9 +54,13 @@ export class MemoryService {
 
     try {
       const res = await this.llm.invoke(
-        `总结以下对话要点（200字以内）：\n${history.map((m) => `${m.role}: ${m.content}`).join('\n')}`,
+        `总结以下对话要点（200字以内）：\n${history.map((m) => `${m.role}: ${m.content}`).join("\n")}`,
       );
-      await this.mem0.saveSessionSummary(userId, sessionId, String(res.content));
+      await this.mem0.saveSessionSummary(
+        userId,
+        sessionId,
+        String(res.content),
+      );
     } catch {
       // 静默降级
     }

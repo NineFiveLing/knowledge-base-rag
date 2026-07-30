@@ -1,15 +1,15 @@
-import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai';
-import { ConfigService } from '@nestjs/config';
-import { Document, DocumentStatus } from '../entities/document.entity';
-import { ChunkerService, Chunk } from './chunker.service';
-import { ElasticsearchService } from '../../../database/elasticsearch/es.service';
-import { Neo4jService } from '../../../database/neo4j/neo4j.service';
-import { MongoDBService } from '../../../database/mongodb/mongodb.service';
-import { VectorService } from '../../../database/postgres/vector.service';
-import { withLLMRetry } from '../../../common/utils/retry.util';
+import { Injectable } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { ConfigService } from "@nestjs/config";
+import { Document, DocumentStatus } from "../entities/document.entity";
+import { ChunkerService, Chunk } from "./chunker.service";
+import { ElasticsearchService } from "../../../database/elasticsearch/es.service";
+import { Neo4jService } from "../../../database/neo4j/neo4j.service";
+import { MongoDBService } from "../../../database/mongodb/mongodb.service";
+import { VectorService } from "../../../database/postgres/vector.service";
+import { withLLMRetry } from "../../../common/utils/retry.util";
 
 /**
  * 三路索引服务（阶段二：异步分块 & 索引）
@@ -30,14 +30,14 @@ export class IndexerService {
     private vectorService: VectorService,
   ) {
     this.llm = new ChatOpenAI({
-      model: 'deepseek-chat',
-      apiKey: config.get('DEEPSEEK_API_KEY'),
-      configuration: { baseURL: config.get('DEEPSEEK_BASE_URL') },
+      model: config.get("MODEL_NAME"),
+      apiKey: config.get("ALIYUN_API_KEY"),
+      configuration: { baseURL: config.get("ALIYUN_BASE_URL") },
     });
     this.embeddings = new OpenAIEmbeddings({
-      modelName: this.config.get('EMBEDDING_MODEL', 'text-embedding-v2'),
-      openAIApiKey: this.config.get('OPENAI_API_KEY'),
-      configuration: { baseURL: this.config.get('OPENAI_BASE_URL') },
+      modelName: this.config.get("EMBEDDING_MODEL", "text-embedding-v2"),
+      openAIApiKey: this.config.get("ALIYUN_API_KEY"),
+      configuration: { baseURL: this.config.get("ALIYUN_BASE_URL") },
     });
   }
 
@@ -52,10 +52,13 @@ export class IndexerService {
     try {
       // 1. 取 Markdown 正文
       const mongoDoc = await this.mongo.getMarkdown(postgresDocId);
-      if (!mongoDoc) throw new Error('MongoDB 中未找到文档正文');
+      if (!mongoDoc) throw new Error("MongoDB 中未找到文档正文");
 
       // 2. 分块
-      const chunks = await this.chunker.chunk(mongoDoc.markdown_content, postgresDocId);
+      const chunks = await this.chunker.chunk(
+        mongoDoc.markdown_content,
+        postgresDocId,
+      );
 
       // 3. 三路并行写入
       await Promise.all(chunks.map((chunk) => this.indexChunk(chunk, doc)));
@@ -82,7 +85,10 @@ export class IndexerService {
         }
       } catch (err) {
         // 降级：图片描述生成失败不影响正常索引流程
-        console.warn(`图片描述生成失败: ${doc.id}/${chunk.chunk_id}`, (err as Error).message);
+        console.warn(
+          `图片描述生成失败: ${doc.id}/${chunk.chunk_id}`,
+          (err as Error).message,
+        );
       }
     }
 
@@ -111,10 +117,16 @@ export class IndexerService {
     // 实体关系提取（LLM + Neo4j）
     const entities = await this.extractEntities(chunk.chunk_text);
     for (const entity of entities) {
-      await this.neo4j.createEntityRelation(entity.name, entity.type, chunk.chunk_id);
+      await this.neo4j.createEntityRelation(
+        entity.name,
+        entity.type,
+        chunk.chunk_id,
+      );
     }
     // PGVector 向量写入：通过阿里云百炼 text-embedding-v2 生成 embedding
-    const [embedding] = await this.embeddings.embedDocuments([chunk.chunk_text]);
+    const [embedding] = await this.embeddings.embedDocuments([
+      chunk.chunk_text,
+    ]);
     await this.vectorService.insertChunk(
       chunk.chunk_id,
       chunk.postgres_doc_id,
@@ -134,11 +146,16 @@ export class IndexerService {
     const res = await this.llm.invoke(
       `从以下文本中提取 5 个关键词，用逗号分隔：\n${text.slice(0, 500)}`,
     );
-    return String(res.content).split(/[,，]/).map((k) => k.trim()).filter(Boolean);
+    return String(res.content)
+      .split(/[,，]/)
+      .map((k) => k.trim())
+      .filter(Boolean);
   }
 
   /** LLM 提取命名实体 */
-  private async extractEntities(text: string): Promise<Array<{ name: string; type: string }>> {
+  private async extractEntities(
+    text: string,
+  ): Promise<Array<{ name: string; type: string }>> {
     const res = await this.llm.invoke(
       `提取命名实体（name, type），type 为 person/organization/process/document/rule 之一。JSON 数组格式：\n${text.slice(0, 800)}`,
     );
@@ -150,19 +167,25 @@ export class IndexerService {
   }
 
   /** 多模态：提取 Markdown 中的图片 URL，调用多模态 LLM 生成中文图片描述 */
-  private async generateImageDescription(markdownText: string): Promise<string> {
-    const imageUrls = [...markdownText.matchAll(/!\[.*?\]\((https?:\/\/[^)]+)\)/g)]
-      .map(m => m[1]);
+  private async generateImageDescription(
+    markdownText: string,
+  ): Promise<string> {
+    const imageUrls = [
+      ...markdownText.matchAll(/!\[.*?\]\((https?:\/\/[^)]+)\)/g),
+    ].map((m) => m[1]);
 
-    if (imageUrls.length === 0) return '';
+    if (imageUrls.length === 0) return "";
 
     const messages: any[] = [
       {
-        role: 'user',
+        role: "user",
         content: [
-          { type: 'text', text: '请用简洁中文描述以下图片的内容，一句话即可。' },
-          ...imageUrls.slice(0, 3).map(url => ({
-            type: 'image_url' as const,
+          {
+            type: "text",
+            text: "请用简洁中文描述以下图片的内容，一句话即可。",
+          },
+          ...imageUrls.slice(0, 3).map((url) => ({
+            type: "image_url" as const,
             image_url: { url },
           })),
         ],
@@ -170,6 +193,6 @@ export class IndexerService {
     ];
 
     const response = await withLLMRetry(() => this.llm.invoke(messages));
-    return typeof response.content === 'string' ? response.content : '';
+    return typeof response.content === "string" ? response.content : "";
   }
 }

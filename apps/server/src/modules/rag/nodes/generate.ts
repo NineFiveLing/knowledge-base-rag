@@ -105,14 +105,22 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langf
         // 查询文档元信息失败不影响主流程
       }
     }
-    const sources = deduped.map((c, i) => ({
-      index: i + 1,
-      docId: c.postgres_doc_id || '',
-      chunkId: c.chunk_id || '',
-      docName: docNameMap.get(c.postgres_doc_id || '') || '未知文档',
-      docType: docTypeMap.get(c.postgres_doc_id || '') || 'text',
-      docSize: docSizeMap.get(c.postgres_doc_id || '') || 0,
-    }));
+    const seen = new Set<string>();
+    const sources = deduped
+      .filter((c) => {
+        const id = c.postgres_doc_id || '';
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
+      .map((c, i) => ({
+        index: i + 1,
+        docId: c.postgres_doc_id || '',
+        chunkId: c.chunk_id || '',
+        docName: docNameMap.get(c.postgres_doc_id || '') || '未知文档',
+        docType: docTypeMap.get(c.postgres_doc_id || '') || 'text',
+        docSize: docSizeMap.get(c.postgres_doc_id || '') || 0,
+      }));
 
     // 将来源 JSON 嵌入答案末尾，前端/SSE 层解析后剥离
     const sourcesTag = `\n<!-- SOURCES:${JSON.stringify(sources)} -->`;

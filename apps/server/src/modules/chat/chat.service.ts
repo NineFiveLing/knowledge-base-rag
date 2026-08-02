@@ -57,7 +57,7 @@ export class ChatService {
     const traceId = this.langfuse.createTrace('chat', { query: message }, userId, sessionId);
     const stream = await this.rag.streamQuery(message, userId, sessionId, traceId || undefined);
     let fullAnswer = '';
-    let sourcesSent = false;
+    let sourcesData: any[] | null = null;
 
     try {
       /** 从文本中提取 SOURCES 标记，返回 { sources, cleanText } */
@@ -78,7 +78,7 @@ export class ChatService {
 
     /** 处理缓冲区：检测完整 SOURCES 标记并剥离，yield 纯文本 */
     const flushBuffer = function* (): Generator<{ type: string; content?: string; sources?: any[] }> {
-      if (!pendingBuffer || sourcesSent) {
+      if (!pendingBuffer || sourcesData) {
         // 直接输出
         if (pendingBuffer) {
           fullAnswer += pendingBuffer;
@@ -91,7 +91,7 @@ export class ChatService {
       const { sources, cleanText } = extractSources(pendingBuffer);
       if (sources) {
         yield { type: 'sources', sources };
-        sourcesSent = true;
+        sourcesData = sources;
       }
 
       if (cleanText) {
@@ -129,7 +129,7 @@ export class ChatService {
         // 非最终答案节点 → 丢弃 token
         if (!currentNode || !ANSWER_NODES.has(currentNode)) continue;
 
-        if (sourcesSent) {
+        if (sourcesData) {
           fullAnswer += token;
           yield { type: 'text', content: token };
         } else if (token.includes(SOURCES_PREFIX) || pendingBuffer.includes(SOURCES_PREFIX)) {
@@ -148,11 +148,11 @@ export class ChatService {
       const output = (event.data as any)?.output;
       if (output?.finalAnswer && typeof output.finalAnswer === 'string') {
         const answer = output.finalAnswer;
-        if (!sourcesSent && answer.includes(SOURCES_PREFIX)) {
+        if (!sourcesData && answer.includes(SOURCES_PREFIX)) {
           const { sources } = extractSources(answer);
           if (sources) {
             yield { type: 'sources', sources };
-            sourcesSent = true;
+            sourcesData = sources;
           }
         }
         if (fullAnswer.length === 0) {
@@ -199,7 +199,7 @@ export class ChatService {
 
     // 流结束后持久化 assistant 消息到 Postgres（user 消息已在流开始前持久化）
     if (resolvedConvId && fullAnswer) {
-      await this.saveMessage(resolvedConvId, 'assistant', fullAnswer).catch((err) => {
+      await this.saveMessage(resolvedConvId, 'assistant', fullAnswer, sourcesData || undefined).catch((err) => {
         this.logger.warn('持久化助手消息失败', (err as Error)?.message);
       });
     }

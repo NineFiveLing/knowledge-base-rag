@@ -17,7 +17,7 @@ export class Message {
   content!: string;
 
   @Column({ type: 'jsonb', nullable: true })
-  sources?: Array<{ index: number; docId: string; chunkId: string; docName: string }>;
+  sources?: Array<{ index: number; docId: string; chunkId: string; docName: string; docType: string; docSize: number }>;
 
   @CreateDateColumn()
   created_at!: Date;

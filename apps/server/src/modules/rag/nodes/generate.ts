@@ -102,7 +102,7 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langf
           docSizeMap.set(d.id, Number(d.size) || 0);
         }
       } catch {
-        // 查询文档名失败不影响主流程
+        // 查询文档元信息失败不影响主流程
       }
     }
     const sources = deduped.map((c, i) => ({

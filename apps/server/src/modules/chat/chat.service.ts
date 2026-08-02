@@ -261,7 +261,7 @@ export class ChatService {
     conversationId: string,
     role: 'user' | 'assistant' | 'system',
     content: string,
-    sources?: Array<{ index: number; docId: string; chunkId: string; docName: string }>,
+    sources?: Array<{ index: number; docId: string; chunkId: string; docName: string; docType: string; docSize: number }>,
   ) {
     const msg = this.msgRepo.create({ conversation_id: conversationId, role, content, sources });
     // 更新对话的 updated_at

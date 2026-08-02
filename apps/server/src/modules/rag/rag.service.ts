@@ -2,6 +2,8 @@ import { Injectable, OnModuleInit } from "@nestjs/common";
 import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
 import { ConfigService } from "@nestjs/config";
 import { HumanMessage } from "@langchain/core/messages";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
 import { createRAGGraph } from "./graph";
 import { createIntentClassifier } from "./nodes/intent";
 import { createAgentNode, createFollowUpAgentNode } from "./nodes/agent";
@@ -16,6 +18,7 @@ import {
 import { SearchService } from "../search/search.service";
 import { MemoryService } from "../memory/memory.service";
 import { LangfuseService } from "../../common/observability/langfuse.service";
+import { Document } from "../document/entities/document.entity";
 import { withLLMRetry } from "../../common/utils/retry.util";
 
 /** RAG 服务：组装完整的 LangGraph Agentic RAG 工作流 */
@@ -30,6 +33,7 @@ export class RAGService implements OnModuleInit {
     private search: SearchService,
     private memory: MemoryService,
     private langfuse: LangfuseService,
+    @InjectRepository(Document) private docRepo: Repository<Document>,
   ) {
     const apiKey = config.get("ALIYUN_API_KEY");
     const baseURL = config.get("ALIYUN_BASE_URL");
@@ -119,7 +123,7 @@ export class RAGService implements OnModuleInit {
           ),
         this.langfuse,
       ),
-      createGenerateNode(this.llm, this.memory, this.langfuse),
+      createGenerateNode(this.llm, this.memory, this.langfuse, this.docRepo),
       routeByIntent,
       decideNext,
     );

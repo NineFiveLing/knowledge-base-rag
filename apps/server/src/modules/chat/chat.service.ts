@@ -33,15 +33,25 @@ export class ChatService {
     // 记录用户消息到 Redis
     await this.memory.onMessage(sessionId, userId, 'user', message);
 
-    // 自动创建对话（不阻塞流：启动异步 Promise，流结束后再 await）
+    // 自动创建对话（若未提供）并立即返回 ID，避免后续消息归属到错误对话
     let resolvedConvId = conversationId;
-    const convPromise = (async () => {
-      if (!resolvedConvId) {
-        const title = message.length > 30 ? message.slice(0, 30) + '…' : message;
-        const conv = await this.createConversation(userId, title);
-        resolvedConvId = conv.id;
-      }
-    })();
+    let isNewConv = false;
+    if (!resolvedConvId) {
+      const title = message.length > 30 ? message.slice(0, 30) + '…' : message;
+      const conv = await this.createConversation(userId, title);
+      resolvedConvId = conv.id;
+      isNewConv = true;
+    }
+
+    // 在发送 SSE 事件前持久化用户消息，确保前端切换会话后 fetch 能立即获取
+    if (resolvedConvId) {
+      await this.saveMessage(resolvedConvId, 'user', message).catch((err) => {
+        this.logger.warn('持久化用户消息失败', (err as Error)?.message);
+      });
+    }
+
+    // 先发送对话 ID 事件，前端据此绑定消息归属
+    yield { type: 'conversation', conversationId: resolvedConvId, isNew: isNewConv };
 
     // 流式 RAG 回答
     const traceId = this.langfuse.createTrace('chat', { query: message }, userId, sessionId);
@@ -91,76 +101,84 @@ export class ChatService {
       pendingBuffer = '';
     };
 
-    // 用于过滤意图分类器泄露的 token（只回复一个词：chat/simple/complex/followup）
-    let intentFilterActive = true;
-    const intentLabels = new Set(['chat', 'simple', 'complex', 'followup']);
+    // 仅 yield 最终答案节点的流式 token，避免 Agent ReAct 中间推理泄露
+    const ANSWER_NODES = new Set(['generate_answer', 'direct_answer']);
+    let currentNode: string | null = null;
 
     for await (const event of stream) {
-      // 流式 token（Agent ReAct 循环中 LLM 流式调用产生）
+      const eventName = event.event;
+      const eventName2 = (event as any).name;
+
+      // ── 追踪当前 graph 节点 ──
+      if (eventName === 'on_chain_start' && eventName2) {
+        const graphNodes = new Set(['intent_classifier', 'direct_answer', 'simple_retrieval', 'agent', 'agent_followup', 'retrieval_tools', 'generate_answer']);
+        if (graphNodes.has(eventName2)) {
+          currentNode = eventName2;
+          if (ANSWER_NODES.has(eventName2)) {
+            fullAnswer = '';
+            pendingBuffer = '';
+          }
+        }
+      }
+
+      // ── 流式 token：仅 yield 来自最终答案节点的 token ──
       if (event.event === 'on_chat_model_stream' && event.data?.chunk?.content) {
         const token = event.data.chunk.content;
         if (typeof token !== 'string') continue;
 
-        // 过滤意图分类器泄露的单标签 token
-        if (intentFilterActive && intentLabels.has(token.trim().toLowerCase())) continue;
-        intentFilterActive = false;
+        // 非最终答案节点 → 丢弃 token
+        if (!currentNode || !ANSWER_NODES.has(currentNode)) continue;
 
         if (sourcesSent) {
-          // 来源已发送，直接输出
           fullAnswer += token;
           yield { type: 'text', content: token };
         } else if (token.includes(SOURCES_PREFIX) || pendingBuffer.includes(SOURCES_PREFIX)) {
-          // 可能包含 SOURCES 标记（含跨 token 情况）
           pendingBuffer += token;
-          // 如果缓冲区包含完整标记（有前缀和闭合后缀），则处理
           if (pendingBuffer.includes(SOURCES_PREFIX) && pendingBuffer.includes(SOURCES_SUFFIX)) {
             yield* flushBuffer();
           }
-          // 否则继续累积等待下一个 token（标记被截断）
         } else {
-          // 普通 token，先 flush 缓冲区再输出
           if (pendingBuffer) yield* flushBuffer();
           fullAnswer += token;
           yield { type: 'text', content: token };
         }
       }
 
-      // 非流式 LLM 调用完成（direct_answer / generate_answer 使用 invoke）
-      if (event.event === 'on_chat_model_end' && event.data?.output?.content) {
-        const text = String(event.data.output.content);
-        if (text && text !== 'chat' && text !== 'simple' && text !== 'complex') {
-          const clean = text.replace(/<!-- SOURCES:.*?-->/, '');
-          if (clean && !fullAnswer.includes(clean)) {
-            fullAnswer = clean;
-            yield { type: 'text', content: clean };
-          }
-        }
-      }
-
-      // 节点输出中的 finalAnswer（direct_answer / generate_answer 的返回值）
+      // ── 节点输出：仅提取 SOURCES 和兜底 fullAnswer ──
       const output = (event.data as any)?.output;
       if (output?.finalAnswer && typeof output.finalAnswer === 'string') {
         const answer = output.finalAnswer;
-        // 先清理可能残留的缓冲区
-        if (pendingBuffer) {
-          pendingBuffer += answer;
-          yield* flushBuffer();
-        } else if (!sourcesSent && answer.includes(SOURCES_PREFIX)) {
-          const { sources, cleanText } = extractSources(answer);
+        if (!sourcesSent && answer.includes(SOURCES_PREFIX)) {
+          const { sources } = extractSources(answer);
           if (sources) {
             yield { type: 'sources', sources };
             sourcesSent = true;
           }
-          if (cleanText) {
-            fullAnswer = cleanText;
-            yield { type: 'text', content: cleanText };
+        }
+        if (fullAnswer.length === 0) {
+          if (pendingBuffer) {
+            pendingBuffer += answer;
+            yield* flushBuffer();
+          } else {
+            const clean = answer.replace(/<!-- SOURCES:.*?-->/, '');
+            if (clean) {
+              fullAnswer = clean;
+              yield { type: 'text', content: clean };
+            }
           }
-        } else {
-          const clean = answer.replace(/<!-- SOURCES:.*?-->/, '');
-          if (clean && (!fullAnswer || clean.length > fullAnswer.length)) {
+        }
+        pendingBuffer = '';
+      }
+
+      // ── 非流式 LLM 兜底：仅最终答案节点 ──
+      if (event.event === 'on_chat_model_end' && event.data?.output?.content) {
+        const text = String(event.data.output.content);
+        if (text && ANSWER_NODES.has(currentNode || '') && fullAnswer.length === 0) {
+          const clean = text.replace(/<!-- SOURCES:.*?-->/, '');
+          if (clean) {
             fullAnswer = clean;
+            yield { type: 'text', content: clean };
           }
-          yield { type: 'text', content: clean };
         }
       }
     }
@@ -179,19 +197,11 @@ export class ChatService {
       await this.memory.onMessage(sessionId, userId, 'assistant', fullAnswer);
     }
 
-    // 流结束后持久化 user + assistant 消息到 Postgres（不阻塞首 token）
-    await convPromise.catch((err) => {
-      this.logger.warn('自动创建对话失败', (err as Error)?.message);
-    });
-    if (resolvedConvId) {
-      await this.saveMessage(resolvedConvId, 'user', message).catch((err) => {
-        this.logger.warn('持久化用户消息失败', (err as Error)?.message);
+    // 流结束后持久化 assistant 消息到 Postgres（user 消息已在流开始前持久化）
+    if (resolvedConvId && fullAnswer) {
+      await this.saveMessage(resolvedConvId, 'assistant', fullAnswer).catch((err) => {
+        this.logger.warn('持久化助手消息失败', (err as Error)?.message);
       });
-      if (fullAnswer) {
-        await this.saveMessage(resolvedConvId, 'assistant', fullAnswer).catch((err) => {
-          this.logger.warn('持久化助手消息失败', (err as Error)?.message);
-        });
-      }
     }
 
     } finally {
@@ -251,7 +261,7 @@ export class ChatService {
     conversationId: string,
     role: 'user' | 'assistant' | 'system',
     content: string,
-    sources?: Array<{ index: number; docId: string; chunkId: string }>,
+    sources?: Array<{ index: number; docId: string; chunkId: string; docName: string }>,
   ) {
     const msg = this.msgRepo.create({ conversation_id: conversationId, role, content, sources });
     // 更新对话的 updated_at

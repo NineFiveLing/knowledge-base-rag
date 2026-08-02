@@ -2,13 +2,23 @@ import { useState, useEffect } from 'react';
 import { Table, Spin, Empty, Tag } from 'antd';
 import api from '../../services/api';
 
-const statusColorMap: Record<string, string> = {
-  indexed: 'green',
-  failed: 'red',
-  indexing: 'blue',
-  parsed: 'gold',
-  uploading: 'default',
-  parsing: 'gold',
+// ── 后端状态 → 前端四态映射（与 DocumentManagePage 一致） ──
+function toFrontendStatus(status: string): string {
+  switch (status) {
+    case 'uploading': case 'parsing': case 'parsed': case 'indexing':
+      return 'uploading';
+    case 'indexed':   return 'indexed';
+    case 'failed':    return 'failed';
+    case 'cancelled': return 'cancelled';
+    default:          return 'failed';
+  }
+}
+
+const STATUS_MAP: Record<string, { label: string; color: string }> = {
+  uploading:  { label: '上传中', color: 'blue' },
+  cancelled:  { label: '已取消', color: 'default' },
+  indexed:    { label: '已上传', color: 'green' },
+  failed:     { label: '已失败', color: 'red' },
 };
 
 export default function KnowledgeBasePage() {
@@ -31,7 +41,10 @@ export default function KnowledgeBasePage() {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      render: (status: string) => <Tag color={statusColorMap[status] || 'default'}>{status}</Tag>,
+      render: (s: string) => {
+        const fs = STATUS_MAP[toFrontendStatus(s)] || { label: s, color: 'default' };
+        return <Tag color={fs.color}>{fs.label}</Tag>;
+      },
     },
     {
       title: '上传时间',

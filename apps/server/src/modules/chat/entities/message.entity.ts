@@ -1,7 +1,8 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { Conversation } from './conversation.entity';
 
 @Entity('messages')
+@Index(['conversation_id'])
 export class Message {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -16,7 +17,7 @@ export class Message {
   content!: string;
 
   @Column({ type: 'jsonb', nullable: true })
-  sources?: Array<{ index: number; docId: string; chunkId: string }>;
+  sources?: Array<{ index: number; docId: string; chunkId: string; docName: string }>;
 
   @CreateDateColumn()
   created_at!: Date;

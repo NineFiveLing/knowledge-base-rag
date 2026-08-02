@@ -35,7 +35,7 @@ services:
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@admin.com
       PGADMIN_DEFAULT_PASSWORD: admin123
-      PGADMIN_CONFIG_SERVER_MODE: 'True'
+      PGADMIN_CONFIG_SERVER_MODE: "True"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     networks:
@@ -170,13 +170,21 @@ services:
     image: rustfs/rustfs:latest
     container_name: kb-rustfs
     restart: always
+    hostname: rustfs-host
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Console
+      - "9000:9000" # S3 API
+      - "9001:9001" # Console
     environment:
+      # S3 API 监听地址（0.0.0.0 表示接受所有网络接口的连接）
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      # Web 控制台监听地址
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
       RUSTFS_ACCESS_KEY: rustfsadmin
       RUSTFS_SECRET_KEY: rustfsadmin
       RUSTFS_DATA_DIR: /data
+      # 允许跨域请求的来源（* 表示允许所有来源）
+      # 注意：生产环境应限制为具体域名，如 https://your-domain.com
+      RUSTFS_CORS_ALLOWED_ORIGINS: "*"
     volumes:
       - rustfs_data:/data
     networks:

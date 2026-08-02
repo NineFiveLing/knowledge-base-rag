@@ -1,6 +1,7 @@
-import { Module, OnModuleInit } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { Module, OnModuleInit, Logger } from '@nestjs/common';
+import { TypeOrmModule, InjectDataSource } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
+import { DataSource } from 'typeorm';
 import { Document } from './entities/document.entity';
 import { DocumentVersion } from './entities/document-version.entity';
 import { DocumentController } from './document.controller';
@@ -49,6 +50,7 @@ import { MongoDBModule } from '../../database/mongodb/mongodb.module';
 export class DocumentModule implements OnModuleInit {
   constructor(
     private docService: DocumentService,
+    @InjectDataSource() private dataSource: DataSource,
     private pdfParser: PdfParser,
     private wordParser: WordParser,
     private mdParser: MarkdownParser,
@@ -60,7 +62,7 @@ export class DocumentModule implements OnModuleInit {
     private videoParser: VideoParser,
   ) {}
 
-  onModuleInit() {
+  async onModuleInit() {
     const parsers: DocumentParser[] = [
       this.pdfParser, this.wordParser, this.mdParser, this.textParser,
       this.excelParser, this.pptParser,
@@ -68,6 +70,17 @@ export class DocumentModule implements OnModuleInit {
     ];
     for (const p of parsers) {
       this.docService.registerParser(p);
+    }
+
+    // 启用 pg_trgm 扩展 + GIN 索引，加速 ILIKE '%keyword%' 文件名搜索
+    try {
+      await this.dataSource.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+      await this.dataSource.query(
+        'CREATE INDEX IF NOT EXISTS idx_documents_name_trgm ON documents USING GIN (name gin_trgm_ops)',
+      );
+      Logger.log('pg_trgm 扩展和文件名搜索索引已就绪', 'DocumentModule');
+    } catch (err) {
+      Logger.warn('pg_trgm 索引初始化失败，文件名搜索可能较慢', 'DocumentModule');
     }
   }
 }

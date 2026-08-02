@@ -21,8 +21,8 @@ const TYPE_MAP: Record<string, string> = {
   ppt: 'ppt', pptx: 'ppt',
   md: 'markdown', txt: 'text',
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image',
-  mp3: 'audio', wav: 'audio', ogg: 'audio',
-  mp4: 'video', avi: 'video', mov: 'video', mkv: 'video',
+  mp3: 'audio', wav: 'audio', ogg: 'audio', m4a: 'audio', flac: 'audio', aac: 'audio',
+  mp4: 'video', avi: 'video', mov: 'video', mkv: 'video', webm: 'video', flv: 'video',
 };
 
 /** 修正 Multer/busboy 将 UTF-8 文件名字节按 Latin-1 误读的编码问题 */
@@ -218,9 +218,9 @@ export class DocumentService {
   }
 
   /** 级联删除文档：从下游到上游清理所有存储中的文档数据 */
-  async deleteDocument(docId: string, userId: string): Promise<void> {
+  async deleteDocument(docId: string, userId: string, isAdmin = false): Promise<void> {
     const doc = await this.findById(docId);
-    if (doc.uploader_id !== userId) throw new ForbiddenException('只能删除自己上传的文档');
+    if (doc.uploader_id !== userId && !isAdmin) throw new ForbiddenException('只能删除自己上传的文档');
 
     const errors: string[] = [];
 
@@ -304,14 +304,17 @@ export class DocumentService {
   async checkViewAccess(docId: string, user: { id: string; dept_id: string }): Promise<Document> {
     const doc = await this.findById(docId);
 
+    // 上传者始终有权限查看自己的文档
+    if (doc.uploader_id === user.id) return doc;
+
     switch (doc.visibility) {
       case DocumentVisibility.PUBLIC:
         return doc;
       case DocumentVisibility.DEPT:
-        if (doc.dept_id === user.dept_id) return doc;
+        // dept_id 为 null 时视作未分配部门，仅允许上传者查看（上面已处理）
+        if (doc.dept_id && doc.dept_id === user.dept_id) return doc;
         throw new ForbiddenException('无权查看此文档');
       case DocumentVisibility.PRIVATE:
-        if (doc.uploader_id === user.id) return doc;
         throw new ForbiddenException('无权查看此文档');
       default:
         throw new ForbiddenException('无权查看此文档');

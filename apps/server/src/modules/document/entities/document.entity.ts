@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
 
 /** 文档处理状态枚举 */
 export enum DocumentStatus {
@@ -24,6 +24,10 @@ export enum DocumentVisibility {
  * 通过 postgres_doc_id 外键关联到此表
  */
 @Entity('documents')
+@Index(['visibility', 'dept_id', 'uploader_id'])
+@Index(['status'])
+@Index(['created_at'])
+@Index(['name'], { unique: false })  // ILIKE 关键词搜索，需配合 pg_trgm GIN 索引
 export class Document {
   /** 全局唯一文档 ID（UUID），所有其他存储通过此 ID 关联 */
   @PrimaryGeneratedColumn('uuid')

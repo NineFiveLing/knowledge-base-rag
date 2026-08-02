@@ -1,13 +1,16 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { Repository, In } from 'typeorm';
 import { AgentStateType } from '../state';
 import { MemoryService } from '../../memory/memory.service';
 import { LangfuseService } from '../../../common/observability/langfuse.service';
+import { Document } from '../../document/entities/document.entity';
 
 const ANSWER_PROMPT = `基于检索到的企业知识库内容回答用户问题。要求：
 - 准确、简洁，涉及流程的用步骤式说明
 - 如果知识库内容不足，诚实说明
-- 用户明确记忆的信息优先使用`;
+- 用户明确记忆的信息优先使用
+- 不要在回答中使用引用编号、来源标记或 [citation:N] 格式，直接输出答案内容`;
 
 /** 文本双字符 bigram（兼容中文） */
 function bigrams(text: string): Set<string> {
@@ -48,7 +51,7 @@ function dedupChunks(
 }
 
 /** 创建答案生成节点 */
-export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langfuse?: LangfuseService) {
+export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langfuse?: LangfuseService, docRepo?: Repository<Document>) {
   return async function generateAnswer(state: AgentStateType): Promise<Partial<AgentStateType>> {
     const startTime = Date.now();
 
@@ -66,7 +69,7 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langf
 
     const contextParts = [ctx.systemContext];
     if (deduped.length > 0) {
-      contextParts.push(`## 检索结果\n${deduped.map((c, i) => `[${i + 1}] ${c.chunk_text}`).join('\n\n')}`);
+      contextParts.push(`## 检索结果\n${deduped.map((c) => `---\n${c.chunk_text}`).join('\n\n')}`);
     }
 
     const system = `${ANSWER_PROMPT}\n\n${contextParts.filter(Boolean).join('\n')}`;
@@ -85,11 +88,30 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langf
       });
     }
 
-    // 构建来源列表
+    // 构建来源列表，附带文档名称
+    const uniqueDocIds = [...new Set(deduped.map((c) => c.postgres_doc_id).filter(Boolean))] as string[];
+    const docNameMap = new Map<string, string>();
+    const docTypeMap = new Map<string, string>();
+    const docSizeMap = new Map<string, number>();
+    if (docRepo && uniqueDocIds.length > 0) {
+      try {
+        const docs = await docRepo.find({ where: { id: In(uniqueDocIds) } });
+        for (const d of docs) {
+          docNameMap.set(d.id, d.name);
+          docTypeMap.set(d.id, d.type);
+          docSizeMap.set(d.id, Number(d.size) || 0);
+        }
+      } catch {
+        // 查询文档名失败不影响主流程
+      }
+    }
     const sources = deduped.map((c, i) => ({
       index: i + 1,
       docId: c.postgres_doc_id || '',
       chunkId: c.chunk_id || '',
+      docName: docNameMap.get(c.postgres_doc_id || '') || '未知文档',
+      docType: docTypeMap.get(c.postgres_doc_id || '') || 'text',
+      docSize: docSizeMap.get(c.postgres_doc_id || '') || 0,
     }));
 
     // 将来源 JSON 嵌入答案末尾，前端/SSE 层解析后剥离

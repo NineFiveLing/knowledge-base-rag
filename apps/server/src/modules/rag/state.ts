@@ -46,6 +46,9 @@ export const AgentState = Annotation.Root({
     index: number;
     docId: string;
     chunkId: string;
+    docName: string;
+    docType: string;
+    docSize: number;
   }>>({
     reducer: (_, next) => next,
     default: () => [],

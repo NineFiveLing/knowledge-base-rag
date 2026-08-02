@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Button, List, Popconfirm, Typography } from 'antd';
-import { PlusOutlined, DeleteOutlined, MessageOutlined } from '@ant-design/icons';
+import { Button, List, Dropdown, Typography, Modal, Input } from 'antd';
+import { PlusOutlined, MoreOutlined, EditOutlined, DeleteOutlined, MessageOutlined } from '@ant-design/icons';
+import type { MenuProps } from 'antd';
 import api from '../../services/api';
 
 interface Conversation {
@@ -18,6 +19,10 @@ interface Props {
 export default function ConversationList({ activeId, onSelect }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
+  // 重命名 Modal 状态
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingConv, setEditingConv] = useState<Conversation | null>(null);
+  const [editTitle, setEditTitle] = useState('');
 
   const fetchList = async () => {
     setLoading(true);
@@ -35,7 +40,6 @@ export default function ConversationList({ activeId, onSelect }: Props) {
     fetchList();
   }, []);
 
-  /** 监听外部刷新事件（例如新对话自动创建后） */
   useEffect(() => {
     const handler = () => { fetchList(); };
     window.addEventListener('refresh-conversations', handler);
@@ -55,6 +59,43 @@ export default function ConversationList({ activeId, onSelect }: Props) {
     if (activeId === id) onSelect('');
   };
 
+  const handleStartRename = (conv: Conversation) => {
+    setEditingConv(conv);
+    setEditTitle(conv.title);
+    setEditModalOpen(true);
+  };
+
+  const handleRenameConfirm = async () => {
+    if (!editingConv || !editTitle.trim()) return;
+    await api.patch(`/chat/conversations/${editingConv.id}`, { title: editTitle.trim() });
+    setEditModalOpen(false);
+    setEditingConv(null);
+    fetchList();
+  };
+
+  const getMenuItems = (item: Conversation): MenuProps['items'] => [
+    {
+      key: 'edit',
+      label: '编辑标题',
+      icon: <EditOutlined />,
+      onClick: ({ domEvent }) => {
+        domEvent.stopPropagation();
+        handleStartRename(item);
+      },
+    },
+    { type: 'divider' },
+    {
+      key: 'delete',
+      label: '删除',
+      icon: <DeleteOutlined />,
+      danger: true,
+      onClick: ({ domEvent }) => {
+        domEvent.stopPropagation();
+        handleDelete(item.id);
+      },
+    },
+  ];
+
   return (
     <div className="conversation-list">
       <div className="conversation-list-header">
@@ -72,33 +113,47 @@ export default function ConversationList({ activeId, onSelect }: Props) {
             className={`conversation-item ${item.id === activeId ? 'active' : ''}`}
             onClick={() => onSelect(item.id)}
             actions={[
-              <Popconfirm
-                key="del"
-                title="确定删除此对话？"
-                onConfirm={(e) => {
-                  e?.stopPropagation();
-                  handleDelete(item.id);
-                }}
-                onCancel={(e) => e?.stopPropagation()}
+              <Dropdown
+                key="more"
+                menu={{ items: getMenuItems(item) }}
+                trigger={['click']}
+                placement="bottomRight"
               >
                 <Button
                   type="text"
                   size="small"
-                  danger
-                  icon={<DeleteOutlined />}
+                  icon={<MoreOutlined />}
                   onClick={(e) => e.stopPropagation()}
                 />
-              </Popconfirm>,
+              </Dropdown>,
             ]}
           >
             <List.Item.Meta
               avatar={<MessageOutlined />}
-              title={item.title.length > 20 ? `${item.title.slice(0, 20)}...` : item.title}
+              title={item.title.length > 24 ? `${item.title.slice(0, 24)}...` : item.title}
               description={new Date(item.updated_at).toLocaleDateString()}
             />
           </List.Item>
         )}
       />
+
+      {/* 重命名 Modal */}
+      <Modal
+        title="编辑对话标题"
+        open={editModalOpen}
+        onOk={handleRenameConfirm}
+        onCancel={() => setEditModalOpen(false)}
+        okText="确定"
+        cancelText="取消"
+      >
+        <Input
+          value={editTitle}
+          onChange={(e) => setEditTitle(e.target.value)}
+          onPressEnter={handleRenameConfirm}
+          placeholder="请输入新标题"
+          maxLength={100}
+        />
+      </Modal>
     </div>
   );
 }

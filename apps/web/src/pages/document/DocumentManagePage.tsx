@@ -91,7 +91,9 @@ export default function DocumentManagePage() {
       await api.delete(`/documents/${id}`);
       setDocuments(prev => prev.filter(d => d.id !== id));
       message.success('删除成功');
-    } catch { message.error('删除失败'); }
+    } catch (err: any) {
+      message.error(err.response?.data?.message || '删除失败');
+    }
   };
 
   const handleCancel = async (id: string) => {
@@ -102,24 +104,28 @@ export default function DocumentManagePage() {
     } catch (err: any) { message.error(err.response?.data?.message || '取消失败'); }
   };
 
-  const handleViewFile = async (id: string) => {
-    try {
-      const res = await api.get(`/documents/${id}/file`, { responseType: 'blob' });
-      const blobUrl = URL.createObjectURL(res.data);
-      window.open(blobUrl, '_blank');
-    } catch { message.error('查看文件失败'); }
+  /** 提取 Content-Disposition 中的 UTF-8 文件名 */
+  const extractFilename = (disposition: string): string => {
+    // 优先匹配 filename*=UTF-8''encoded (RFC 5987)
+    const utf8Match = disposition?.match(/filename\*=UTF-8''([^;]+)/);
+    if (utf8Match) return decodeURIComponent(utf8Match[1]);
+    // 回退：普通 filename="..."
+    const match = disposition?.match(/filename="?([^";\n]+)"?/);
+    if (match) return match[1].replace(/\\/g, '');
+    return 'download';
   };
 
+  /** 下载原文件 —— blob 下载，携带 JWT token */
   const handleDownload = async (id: string) => {
     try {
       const res = await api.get(`/documents/${id}/download`, { responseType: 'blob' });
       const blobUrl = URL.createObjectURL(res.data);
       const a = document.createElement('a');
       a.href = blobUrl;
-      const disposition = res.headers['content-disposition'];
-      const match = disposition?.match(/filename="?([^"]+)"?/);
-      a.download = match?.[1] || 'download';
+      a.download = extractFilename(res.headers['content-disposition'] || '');
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(blobUrl);
     } catch { message.error('下载文件失败'); }
   };
@@ -155,9 +161,9 @@ export default function DocumentManagePage() {
         const fs = toFrontendStatus(record.status);
         return (
           <Space size="small" wrap>
-            {/* 👁 查看 — 全部状态 */}
+            {/* 👁 查看 — 全部状态，打开详情抽屉（与点击标题一致） */}
             <Button size="small" icon={<EyeOutlined />}
-              onClick={() => handleViewFile(record.id)}>查看</Button>
+              onClick={() => setDetailDocId(record.id)}>查看</Button>
 
             {/* 📥 下载 — 仅已上传 */}
             {fs === 'indexed' && (

@@ -1,7 +1,9 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany, Index } from 'typeorm';
 import { Message } from './message.entity';
 
 @Entity('conversations')
+@Index(['user_id'])
+@Index(['updated_at'])
 export class Conversation {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

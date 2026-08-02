@@ -4,6 +4,7 @@ import { InboxOutlined, UploadOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { UploadFile } from 'antd/es/upload/interface';
 import api from '../../services/api';
+import { useAuthStore } from '../../stores/auth.store';
 
 const { Dragger } = Upload;
 
@@ -12,6 +13,7 @@ export default function DocumentUploadPage() {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const { message } = App.useApp();
+  const user = useAuthStore((s) => s.user);
 
   const handleUpload = async () => {
     const file = fileList[0]?.originFileObj;
@@ -21,6 +23,7 @@ export default function DocumentUploadPage() {
     setProgress(0);
     const formData = new FormData();
     formData.append('file', file);
+    if (user?.dept_id) formData.append('dept_id', user.dept_id);
 
     try {
       const { data } = await api.post('/documents/upload', formData, {

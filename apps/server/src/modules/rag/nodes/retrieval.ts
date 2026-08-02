@@ -18,6 +18,8 @@ export function createRetrievalNode(
   return async function executeRetrievalTools(state: AgentStateType): Promise<Partial<AgentStateType>> {
     const lastMsg = state.messages[state.messages.length - 1] as AIMessage;
     const toolMsgs: ToolMessage[] = [];
+    // 累积所有检索轮次的 chunk，确保 agent 路径也能填充 retrievedChunks
+    const aggregatedChunks = [...state.retrievedChunks];
 
     if (lastMsg.tool_calls) {
       for (const call of lastMsg.tool_calls) {
@@ -34,6 +36,20 @@ export function createRetrievalNode(
             try { resultCount = JSON.parse(result).length; } catch { /* ignore */ }
             langfuse.endSpan(span, { resultCount, latencyMs: Date.now() - toolStart });
           }
+          // 解析 tool 返回的 JSON 结果，提取 chunk 数据填充 retrievedChunks
+          try {
+            const items = JSON.parse(result);
+            if (Array.isArray(items)) {
+              for (const item of items) {
+                aggregatedChunks.push({
+                  chunk_text: item.chunk_text || '',
+                  score: item.rerankScore ?? item.score ?? 0,
+                  chunk_id: item.chunk_id,
+                  postgres_doc_id: item.postgres_doc_id,
+                });
+              }
+            }
+          } catch { /* JSON 解析失败不影响主流程 */ }
           toolMsgs.push(new ToolMessage({ content: result, tool_call_id: call.id! }));
         }
       }
@@ -41,6 +57,7 @@ export function createRetrievalNode(
 
     return {
       messages: toolMsgs,
+      retrievedChunks: aggregatedChunks,
       toolCallsRemaining: state.toolCallsRemaining - 1,
     };
   };

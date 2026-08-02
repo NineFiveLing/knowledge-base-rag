@@ -53,11 +53,24 @@ export default function ChatPage() {
     activeConvRef.current = activeConvId;
   }, [activeConvId]);
 
-  // ── 自动滚动到最新消息 ──
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-  useEffect(() => { scrollToBottom(); }, [messages, streaming, thinking]);
+  // ── 自动滚动到最新消息（RAF 节流，流式期间 instant 避免 smooth 堆积卡顿） ──
+  const scrollRafRef = useRef<number | null>(null);
+  const scrollToBottom = useCallback((smooth: boolean) => {
+    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'end' });
+  }, []);
+  useEffect(() => {
+    if (scrollRafRef.current !== null) return; // 已有待执行的滚动，跳过
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollToBottom(!streaming); // 流式期间 instant，完成时 smooth
+      scrollRafRef.current = null;
+    });
+    return () => {
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+    };
+  }, [messages, streaming, thinking, scrollToBottom]);
 
   // ── WebSocket 语音生命周期 ──
   useEffect(() => {
@@ -65,27 +78,6 @@ export default function ChatPage() {
     return () => { socket?.disconnect(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // ── 恢复对话实时状态到 UI state（切换对话时调用） ──
-  const applyConvState = (convId: string | null) => {
-    if (!convId) {
-      setStreaming('');
-      setThinking(false);
-      sourcesRef.current = [];
-      return;
-    }
-    const live = convLiveRef.current.get(convId);
-    if (live) {
-      setStreaming(live.streaming);
-      setThinking(live.thinking);
-      sourcesRef.current = live.sources;
-      // 不覆盖 messages：服务端 fetch 的数据是权威的
-    } else {
-      setStreaming('');
-      setThinking(false);
-      sourcesRef.current = [];
-    }
-  };
 
   // ── 发送消息 ──
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -148,7 +140,13 @@ export default function ChatPage() {
         const finalText = streamingRef.current;
         const finalSources = sourcesRef.current.length > 0 ? [...sourcesRef.current] : undefined;
         if (finalText) {
-          setMessages((msgs) => [...msgs, { role: 'assistant', content: finalText, sources: finalSources }]);
+          setMessages((msgs) => {
+            // 避免 fetch ↔ onDone 竞态重复：
+            // 若 fetch 已恢复持久化的 assistant 消息（末条已是 assistant），
+            // 说明后端 saveMessage 在 onDone 前完成，不再追加第二条
+            if (msgs[msgs.length - 1]?.role === 'assistant') return msgs;
+            return [...msgs, { role: 'assistant', content: finalText, sources: finalSources }];
+          });
           // 同步到缓存
           if (currentSSEConvRef.current) {
             const cached = convMessagesRef.current.get(currentSSEConvRef.current) || [];
@@ -202,6 +200,9 @@ export default function ChatPage() {
 
   // ── 切换对话 ──
   const handleSelectConv = useCallback(async (convId: string) => {
+    // 点击当前对话 — 无需切换
+    if (convId === activeConvRef.current) return;
+
     // 不中断旧对话的 SSE！保存当前 live 状态 + messages 缓存
     if (activeConvRef.current) {
       convLiveRef.current.set(activeConvRef.current, {
@@ -216,7 +217,21 @@ export default function ChatPage() {
       }
     }
 
-    // 切换到新对话
+    // ── 先恢复目标对话的 live 状态，再更新 activeConvRef ──
+    // 避免 SSE onToken 在 ref 已更新但 live 尚未恢复时覆盖流式状态
+    const live = convLiveRef.current.get(convId);
+    if (live) {
+      setStreaming(live.streaming);
+      setThinking(live.thinking);
+      sourcesRef.current = live.sources;
+    } else {
+      setStreaming('');
+      setThinking(false);
+      sourcesRef.current = [];
+    }
+
+    // 同步更新 ref（SSE 回调据此判断前台/后台路由）
+    activeConvRef.current = convId;
     setActiveConvId(convId);
     setLoadingHistory(true);
 
@@ -238,9 +253,6 @@ export default function ChatPage() {
     } finally {
       setLoadingHistory(false);
     }
-
-    // 恢复该对话的实时 SSE 状态
-    applyConvState(convId);
   }, []); // 空依赖：通过 refs 读取最新 streaming/thinking/sources/messages
 
   // ── 当前显示的实时状态 ──

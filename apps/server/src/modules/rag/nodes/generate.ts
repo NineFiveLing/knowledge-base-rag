@@ -105,6 +105,15 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langf
         // 查询文档元信息失败不影响主流程
       }
     }
+    // 计算每个文档的最高检索分数（用于排序）
+    const docScoreMap = new Map<string, number>();
+    for (const c of deduped) {
+      const id = c.postgres_doc_id || '';
+      if (!id) continue;
+      const best = docScoreMap.get(id) || 0;
+      if (c.score > best) docScoreMap.set(id, c.score);
+    }
+
     const seen = new Set<string>();
     const sources = deduped
       .filter((c) => {
@@ -113,13 +122,22 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langf
         seen.add(id);
         return true;
       })
-      .map((c, i) => ({
-        index: i + 1,
+      .map((c) => ({
         docId: c.postgres_doc_id || '',
         chunkId: c.chunk_id || '',
         docName: docNameMap.get(c.postgres_doc_id || '') || '未知文档',
         docType: docTypeMap.get(c.postgres_doc_id || '') || 'text',
         docSize: docSizeMap.get(c.postgres_doc_id || '') || 0,
+        _score: docScoreMap.get(c.postgres_doc_id || '') || 0,
+      }))
+      .sort((a, b) => b._score - a._score)
+      .map((s, i) => ({
+        index: i + 1,
+        docId: s.docId,
+        chunkId: s.chunkId,
+        docName: s.docName,
+        docType: s.docType,
+        docSize: s.docSize,
       }));
 
     // 将来源 JSON 嵌入答案末尾，前端/SSE 层解析后剥离

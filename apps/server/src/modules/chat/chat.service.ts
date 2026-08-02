@@ -89,7 +89,7 @@ export class ChatService {
       }
 
       const { sources, cleanText } = extractSources(pendingBuffer);
-      if (sources) {
+      if (sources && sources.length > 0) {
         yield { type: 'sources', sources };
         sourcesData = sources;
       }
@@ -150,7 +150,7 @@ export class ChatService {
         const answer = output.finalAnswer;
         if (!sourcesData && answer.includes(SOURCES_PREFIX)) {
           const { sources } = extractSources(answer);
-          if (sources) {
+          if (sources && sources.length > 0) {
             yield { type: 'sources', sources };
             sourcesData = sources;
           }

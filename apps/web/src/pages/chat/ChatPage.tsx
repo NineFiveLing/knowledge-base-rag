@@ -14,6 +14,8 @@ interface SourceRef {
   docId: string;
   chunkId: string;
   docName: string;
+  docType: string;
+  docSize: number;
 }
 
 function formatSize(bytes: number): string {

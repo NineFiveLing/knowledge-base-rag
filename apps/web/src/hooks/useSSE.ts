@@ -3,7 +3,7 @@ import { useCallback, useRef } from 'react';
 interface SSEEvent {
   type: 'text' | 'sources' | 'conversation';
   content?: string;
-  sources?: Array<{ index: number; docId: string; chunkId: string; docName: string }>;
+  sources?: Array<{ index: number; docId: string; chunkId: string; docName: string; docType: string; docSize: number }>;
   conversationId?: string;
   isNew?: boolean;
 }
@@ -28,7 +28,7 @@ export function useSSE() {
       sessionId: string,
       onToken: (token: string) => void,
       onDone: () => void,
-      onSources?: (sources: Array<{ index: number; docId: string; chunkId: string; docName: string }>) => void,
+      onSources?: (sources: Array<{ index: number; docId: string; chunkId: string; docName: string; docType: string; docSize: number }>) => void,
       conversationId?: string | null,
       onConversation?: (conversationId: string, isNew: boolean) => void,
     ) => {

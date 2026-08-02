@@ -1,29 +1,15 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Input, Button, Tag, Popover, Descriptions, Spin, message as antMsg } from 'antd';
+import { Input, Button, message as antMsg } from 'antd';
 import { SendOutlined, UserOutlined, RobotOutlined } from '@ant-design/icons';
 import { useSSE } from '../../hooks/useSSE';
 import { useVoiceChat } from '../../hooks/useVoiceChat';
 import VoiceButton from '../../components/chat/VoiceButton';
 import ConversationList from '../../components/chat/ConversationList';
+import { SourceCard } from '../../components/chat/SourceCard';
+import type { SourceRef } from '../../components/chat/SourceCard';
+import DocumentDetailDrawer from '../../components/document/DocumentDetailDrawer';
 
 interface Message { role: 'user' | 'assistant'; content: string; }
-
-/** 每个对话的实时 SSE 状态（跨对话切换保持） */
-interface SourceRef {
-  index: number;
-  docId: string;
-  chunkId: string;
-  docName: string;
-  docType: string;
-  docSize: number;
-}
-
-function formatSize(bytes: number): string {
-  if (!bytes) return '-';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 interface ConvLive {
   streaming: string;
@@ -38,32 +24,10 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState('');
   const [input, setInput] = useState('');
   const [sources, setSources] = useState<SourceRef[]>([]);
+  const [sourceDetailDocId, setSourceDetailDocId] = useState<string | null>(null);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [thinking, setThinking] = useState(false);
-
-  // ── 来源文档详情缓存（点击参考来源时懒加载） ──
-  const [sourceDocCache, setSourceDocCache] = useState<Map<string, any>>(new Map());
-  const [sourceLoadingSet, setSourceLoadingSet] = useState<Set<string>>(new Set());
-  const fetchSourceDoc = async (docId: string) => {
-    if (sourceDocCache.has(docId) || sourceLoadingSet.has(docId)) return;
-    setSourceLoadingSet((prev) => new Set(prev).add(docId));
-    try {
-      const token = localStorage.getItem('access_token');
-      const res = await fetch(`/api/documents/${docId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSourceDocCache((prev) => new Map(prev).set(docId, data));
-      }
-    } catch { /* ignore */ }
-    setSourceLoadingSet((prev) => {
-      const next = new Set(prev);
-      next.delete(docId);
-      return next;
-    });
-  };
 
   const { sendMessage, abortConv } = useSSE();
   const sessionId = useRef(`sess-${Date.now()}`).current;
@@ -344,41 +308,19 @@ export default function ChatPage() {
 
         {displaySources.length > 0 && (
           <div className="chat-sources">
-            <span className="chat-sources-label">参考来源：</span>
-            {displaySources.map((s) => {
-              const docInfo = sourceDocCache.get(s.docId);
-              const isLoading = sourceLoadingSet.has(s.docId);
-              const popoverContent = (
-                <div style={{ maxWidth: 300 }}>
-                  {isLoading ? (
-                    <div style={{ textAlign: 'center', padding: 12 }}><Spin size="small" /></div>
-                  ) : docInfo ? (
-                    <Descriptions column={1} size="small" colon={false}>
-                      <Descriptions.Item label="文档">{docInfo.name}</Descriptions.Item>
-                      <Descriptions.Item label="类型">{docInfo.type}</Descriptions.Item>
-                      <Descriptions.Item label="大小">{formatSize(docInfo.size)}</Descriptions.Item>
-                    </Descriptions>
-                  ) : (
-                    <div style={{ color: '#999', fontSize: 12, textAlign: 'center', padding: 8 }}>
-                      加载失败
-                    </div>
-                  )}
-                </div>
-              );
-              return (
-                <Popover
-                  key={s.index}
-                  title={s.docName}
-                  content={popoverContent}
-                  trigger="click"
-                  onOpenChange={(visible) => { if (visible) fetchSourceDoc(s.docId); }}
-                >
-                  <Tag color="blue" style={{ cursor: 'pointer' }}>
-                    [{s.index}]
-                  </Tag>
-                </Popover>
-              );
-            })}
+            <div className="chat-sources-header">
+              <span>📎 参考来源</span>
+              <span className="chat-sources-hint">· 以下文档为该回答提供了参考依据</span>
+            </div>
+            <div className="chat-sources-cards">
+              {displaySources.map((s) => (
+                <SourceCard
+                  key={`${s.docId}-${s.index}`}
+                  source={s}
+                  onClick={() => setSourceDetailDocId(s.docId)}
+                />
+              ))}
+            </div>
           </div>
         )}
 
@@ -405,6 +347,12 @@ export default function ChatPage() {
         </div>
         {asrText && <div className="asr-preview">{asrText}</div>}
       </main>
+
+      <DocumentDetailDrawer
+        open={!!sourceDetailDocId}
+        docId={sourceDetailDocId}
+        onClose={() => setSourceDetailDocId(null)}
+      />
     </div>
   );
 }

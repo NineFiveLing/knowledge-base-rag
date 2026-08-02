@@ -134,8 +134,10 @@ body,
 }
 .chat-sources-cards {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 
 /* 来源卡片 */
@@ -150,6 +152,7 @@ body,
   cursor: pointer;
   transition: all 0.2s;
   max-width: 260px;
+  flex-shrink: 0;
 }
 .source-card:hover {
   border-color: #1677ff;

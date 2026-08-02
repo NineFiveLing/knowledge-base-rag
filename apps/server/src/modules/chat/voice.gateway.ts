@@ -15,7 +15,7 @@ import { TtsService } from './services/tts.service';
 export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server!: Server;
   private readonly logger = new Logger(VoiceGateway.name);
-  private sessions = new Map<string, { isListening: boolean }>();
+  private sessions = new Map<string, { isListening: boolean; client: Socket }>();
 
   constructor(
     private readonly asrService: AsrService,
@@ -24,29 +24,61 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   handleConnection(client: Socket) {
     this.logger.log(`语音客户端连接: ${client.id}`);
-    this.sessions.set(client.id, { isListening: false });
+    this.sessions.set(client.id, { isListening: false, client });
   }
 
   handleDisconnect(client: Socket) {
     this.logger.log(`语音客户端断开: ${client.id}`);
     this.sessions.delete(client.id);
-    this.asrService.endSession(client.id).catch(e => this.logger.error(e));
+    this.asrService.endSession(client.id).catch((e) => this.logger.error(e));
   }
 
-  /** 接收音频分片 */
+  /** 开始监听：初始化 ASR 会话 */
+  @SubscribeMessage('startListening')
+  async handleStartListening(client: Socket): Promise<void> {
+    const session = this.sessions.get(client.id);
+    if (session) session.isListening = true;
+
+    try {
+      await this.asrService.startSession(client.id, {
+        onPartialResult: (text: string) => {
+          client.emit('asrResult', { text, isFinal: false });
+        },
+        onFinalResult: (text: string) => {
+          client.emit('asrResult', { text, isFinal: true });
+        },
+        onError: (err: Error) => {
+          this.logger.error(`ASR 错误 [${client.id}]: ${err.message}`);
+          client.emit('asrResult', { text: '', isFinal: true, error: err.message });
+        },
+      });
+    } catch (err) {
+      this.logger.error(`启动 ASR 会话失败 [${client.id}]: ${(err as Error).message}`);
+      client.emit('asrResult', { text: '', isFinal: true, error: '语音服务暂不可用' });
+    }
+  }
+
+  /** 接收音频分片（PCM 16kHz 16bit 单声道） */
   @SubscribeMessage('audio')
   async handleAudio(client: Socket, payload: ArrayBuffer): Promise<void> {
     const session = this.sessions.get(client.id);
-    if (!session) return;
+    if (!session?.isListening) return;
 
     const buffer = Buffer.from(payload);
-    const result = await this.asrService.feedAudio(client.id, buffer);
+    await this.asrService.feedAudio(client.id, buffer);
+  }
 
-    client.emit('asrResult', { text: result.text, isFinal: result.isFinal });
+  /** 停止监听：结束 ASR 会话，获取完整文本 */
+  @SubscribeMessage('stopListening')
+  async handleStopListening(client: Socket): Promise<void> {
+    const session = this.sessions.get(client.id);
+    if (session) session.isListening = false;
 
-    if (result.isFinal && result.text.trim()) {
-      session.isListening = false;
-      client.emit('triggerChat', { message: result.text, sessionId: client.id });
+    const finalText = await this.asrService.endSession(client.id);
+    this.logger.log(`ASR 最终文本 [${client.id}]: "${finalText.slice(0, 50)}${finalText.length > 50 ? '…' : ''}"`);
+
+    if (finalText.trim()) {
+      client.emit('triggerChat', { message: finalText.trim(), sessionId: client.id });
     }
   }
 
@@ -57,23 +89,5 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.emit('audioChunk', audioChunk);
     }
     client.emit('audioEnd');
-  }
-
-  @SubscribeMessage('startListening')
-  handleStartListening(client: Socket): void {
-    const session = this.sessions.get(client.id);
-    if (session) session.isListening = true;
-    this.asrService.startSession(client.id).catch(e => this.logger.error(e));
-  }
-
-  @SubscribeMessage('stopListening')
-  async handleStopListening(client: Socket): Promise<void> {
-    const session = this.sessions.get(client.id);
-    if (session) session.isListening = false;
-
-    const finalText = await this.asrService.endSession(client.id);
-    if (finalText.trim()) {
-      client.emit('triggerChat', { message: finalText, sessionId: client.id });
-    }
   }
 }

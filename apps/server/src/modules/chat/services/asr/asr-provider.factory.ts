@@ -1,0 +1,27 @@
+import { ConfigService } from '@nestjs/config';
+import type { AsrProvider } from './asr-provider.interface';
+import { AliDashScopeAsrProvider } from './ali-dashscope.provider';
+import { TencentAsrProvider } from './tencent.provider';
+
+/** 根据 DEFAULT_ASR_PROVIDER 配置创建对应的 ASR 提供商实例 */
+export function createAsrProvider(config: ConfigService): AsrProvider {
+  const provider = (config.get('DEFAULT_ASR_PROVIDER') || 'aliyun').toLowerCase();
+
+  switch (provider) {
+    case 'aliyun': {
+      const apiKey = config.get('ALIYUN_API_KEY') || '';
+      if (!apiKey) throw new Error('ALIYUN_API_KEY 未配置，阿里云 ASR 不可用');
+      return new AliDashScopeAsrProvider(apiKey);
+    }
+    case 'tencent': {
+      const secretId = config.get('TENCENT_SECRET_ID') || '';
+      const secretKey = config.get('TENCENT_SECRET_KEY') || '';
+      const appId = config.get('TENCENT_APP_ID') || '';
+      if (!secretId || !secretKey) throw new Error('TENCENT_SECRET_ID/SECRET_KEY 未配置，腾讯云 ASR 不可用');
+      if (!appId) throw new Error('TENCENT_APP_ID 未配置，腾讯云 ASR 需要 AppID');
+      return new TencentAsrProvider(secretId, secretKey, appId);
+    }
+    default:
+      throw new Error(`未知 ASR 提供商: ${provider}，可选值: aliyun | tencent`);
+  }
+}

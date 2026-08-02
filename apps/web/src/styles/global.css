@@ -116,19 +116,66 @@ body,
   margin: 0 6px;
 }
 
-/* 参考来源 */
+/* 来源卡片区域 */
 .chat-sources {
+  margin-top: 12px;
+}
+.chat-sources-header {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 8px 16px;
-  border-top: 1px solid #f0f0f0;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #8b8b8b;
 }
-.chat-sources-label {
-  margin-right: 8px;
-  color: #666;
+.chat-sources-hint {
+  font-size: 11px;
+  color: #bbb;
+}
+.chat-sources-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 来源卡片 */
+.source-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  max-width: 260px;
+}
+.source-card:hover {
+  border-color: #1677ff;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08);
+}
+.source-card-body {
+  min-width: 0;
+  flex: 1;
+}
+.source-card-name {
+  font-weight: 500;
   font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #262626;
+}
+.source-card-size {
+  color: #999;
+  font-size: 11px;
+  margin-top: 1px;
+}
+.source-card-arrow {
+  color: #bbb;
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 /* ASR 语音识别预览 */

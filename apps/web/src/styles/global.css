@@ -82,6 +82,11 @@ body,
 .chat-bubble.streaming {
   border-left: 3px solid #667eea;
 }
+
+.chat-bubble-wrapper {
+  max-width: 75%;
+  min-width: 0;
+}
 .chat-bubble.thinking {
   color: #999;
   font-style: italic;

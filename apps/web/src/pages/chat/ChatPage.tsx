@@ -9,7 +9,7 @@ import { SourceCard } from '../../components/chat/SourceCard';
 import type { SourceRef } from '../../components/chat/SourceCard';
 import DocumentDetailDrawer from '../../components/document/DocumentDetailDrawer';
 
-interface Message { role: 'user' | 'assistant'; content: string; }
+interface Message { role: 'user' | 'assistant'; content: string; sources?: SourceRef[]; }
 
 interface ConvLive {
   streaming: string;
@@ -23,7 +23,6 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState('');
   const [input, setInput] = useState('');
-  const [sources, setSources] = useState<SourceRef[]>([]);
   const [sourceDetailDocId, setSourceDetailDocId] = useState<string | null>(null);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -72,19 +71,19 @@ export default function ChatPage() {
     if (!convId) {
       setStreaming('');
       setThinking(false);
-      setSources([]);
+      sourcesRef.current = [];
       return;
     }
     const live = convLiveRef.current.get(convId);
     if (live) {
       setStreaming(live.streaming);
       setThinking(live.thinking);
-      setSources(live.sources);
+      sourcesRef.current = live.sources;
       // 不覆盖 messages：服务端 fetch 的数据是权威的
     } else {
       setStreaming('');
       setThinking(false);
-      setSources([]);
+      sourcesRef.current = [];
     }
   };
 
@@ -100,7 +99,7 @@ export default function ChatPage() {
     // 用户消息
     setMessages((prev) => [...prev, { role: 'user', content: text }]);
     setStreaming('');
-    setSources([]);
+    sourcesRef.current = [];
     setThinking(true);
 
     // 有新消息时刷新对话列表（修复已存在对话不更新排序的 bug）
@@ -133,7 +132,7 @@ export default function ChatPage() {
           const live = convLiveRef.current.get(key);
           if (live?.streaming) {
             const cached = convMessagesRef.current.get(key) || [];
-            cached.push({ role: 'assistant' as const, content: live.streaming });
+            cached.push({ role: 'assistant' as const, content: live.streaming, sources: live.sources?.length ? live.sources : undefined });
             convMessagesRef.current.set(key, cached);
           }
           convLiveRef.current.delete(key);
@@ -147,12 +146,13 @@ export default function ChatPage() {
         // ⚠️ 不在 setStreaming updater 内调用 setMessages
         // React StrictMode 会双重调用 updater，导致 setMessages 排队两次 → 重复消息
         const finalText = streamingRef.current;
+        const finalSources = sourcesRef.current.length > 0 ? [...sourcesRef.current] : undefined;
         if (finalText) {
-          setMessages((msgs) => [...msgs, { role: 'assistant', content: finalText }]);
+          setMessages((msgs) => [...msgs, { role: 'assistant', content: finalText, sources: finalSources }]);
           // 同步到缓存
           if (currentSSEConvRef.current) {
             const cached = convMessagesRef.current.get(currentSSEConvRef.current) || [];
-            cached.push({ role: 'assistant', content: finalText });
+            cached.push({ role: 'assistant', content: finalText, sources: finalSources });
             convMessagesRef.current.set(currentSSEConvRef.current, cached);
           }
         }
@@ -173,7 +173,7 @@ export default function ChatPage() {
           }
           return;
         }
-        setSources(srcs);
+        sourcesRef.current = srcs;
       },
       currentSSEConvRef.current,
       // onConversation — SSE 首个事件，告知新创建的对话 ID
@@ -226,7 +226,11 @@ export default function ChatPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      const msgs: Message[] = data.messages.map((m: any) => ({ role: m.role, content: m.content }));
+      const msgs: Message[] = data.messages.map((m: any) => ({
+        role: m.role,
+        content: m.content,
+        sources: m.sources || undefined,
+      }));
       convMessagesRef.current.set(convId, msgs);
       setMessages(msgs);
     } catch {
@@ -242,13 +246,23 @@ export default function ChatPage() {
   // ── 当前显示的实时状态 ──
   const displayStreaming = streaming;
   const displayThinking = thinking;
-  const displaySources = sources;
+  // 流式期间从 ref 取 sources（消息尚未写入 messages 数组），
+  // 非流式期间从最后一条 assistant 消息的 sources 字段取
+  const displaySources: SourceRef[] = (displayStreaming
+    ? sourcesRef.current
+    : (() => {
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === 'assistant' && messages[i].sources) {
+            return messages[i].sources;
+          }
+        }
+        return [];
+      })()) as SourceRef[];
 
   // ── 同步最新 state 到 ref（供 useCallback 中读取，避免依赖频繁更新的 state） ──
   messagesRef.current = messages;
   streamingRef.current = streaming;
   thinkingRef.current = thinking;
-  sourcesRef.current = sources;
   inputRef.current = input;
 
   return (
@@ -271,7 +285,21 @@ export default function ChatPage() {
               <div className={`chat-avatar ${m.role}`}>
                 {m.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
               </div>
-              <div className={`chat-bubble ${m.role}`}>{m.content}</div>
+              <div className="chat-bubble-wrapper">
+                <div className={`chat-bubble ${m.role}`}>{m.content}</div>
+                {m.role === 'assistant' && m.sources && m.sources.length > 0 && (
+                  <div className="chat-sources">
+                    <div className="chat-sources-header">
+                      <span>📎 参考来源</span>
+                    </div>
+                    <div className="chat-sources-cards">
+                      {m.sources.map((s) => (
+                        <SourceCard key={s.docId} source={s} onClick={() => setSourceDetailDocId(s.docId)} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           ))}
 
@@ -289,7 +317,21 @@ export default function ChatPage() {
           {displayStreaming && (
             <div className="chat-bubble-row assistant">
               <div className="chat-avatar assistant"><RobotOutlined /></div>
-              <div className="chat-bubble assistant streaming">{displayStreaming}</div>
+              <div className="chat-bubble-wrapper">
+                <div className="chat-bubble assistant streaming">{displayStreaming}</div>
+                {displaySources.length > 0 && (
+                  <div className="chat-sources">
+                    <div className="chat-sources-header">
+                      <span>📎 参考来源</span>
+                    </div>
+                    <div className="chat-sources-cards">
+                      {displaySources.map((s) => (
+                        <SourceCard key={s.docId} source={s} onClick={() => setSourceDetailDocId(s.docId)} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -305,24 +347,6 @@ export default function ChatPage() {
             </div>
           )}
         </div>
-
-        {displaySources.length > 0 && (
-          <div className="chat-sources">
-            <div className="chat-sources-header">
-              <span>📎 参考来源</span>
-              <span className="chat-sources-hint">· 以下文档为该回答提供了参考依据</span>
-            </div>
-            <div className="chat-sources-cards">
-              {displaySources.map((s) => (
-                <SourceCard
-                  key={`${s.docId}-${s.index}`}
-                  source={s}
-                  onClick={() => setSourceDetailDocId(s.docId)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
 
         <div className="chat-input-area">
           <Input

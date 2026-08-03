@@ -9,6 +9,7 @@ interface DocInfo {
   visibility: string;
   dept_id?: string;
   folder_id?: string;
+  kb_id?: string;
 }
 
 interface Props {
@@ -27,10 +28,20 @@ export default function DocumentEditModal({ open, document, onClose, onSuccess }
   const [selectedKbId, setSelectedKbId] = useState<string | undefined>();
   const [folderTree, setFolderTree] = useState<DataNode[]>([]);
 
+  // 部门选择
+  const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
+
   // 加载 KB 列表
   useEffect(() => {
     api.get('/knowledge-bases').then(({ data }) => {
       setKbs((data || []).map((kb: any) => ({ value: kb.id, label: kb.name })));
+    }).catch(() => {});
+  }, []);
+
+  // 加载部门列表
+  useEffect(() => {
+    api.get('/departments').then(({ data }) => {
+      setDepartments((data || []).map((d: any) => ({ value: d.id, label: d.name })));
     }).catch(() => {});
   }, []);
 
@@ -55,17 +66,11 @@ export default function DocumentEditModal({ open, document, onClose, onSuccess }
       form.setFieldsValue({
         name: document.name,
         visibility: document.visibility,
-        dept_id: document.dept_id || '',
+        dept_id: document.dept_id || undefined,
         folder_id: document.folder_id || undefined,
+        kb_id: document.kb_id || undefined,
       });
-      // 如果文档已有 folder_id，反查所属知识库
-      if (document.folder_id) {
-        api.get('/knowledge-bases').then(({ data }) => {
-          for (const kb of data || []) {
-            // 简单方案：先设置 KB 为 undefined，让用户重新选择
-          }
-        }).catch(() => {});
-      }
+      setSelectedKbId(document.kb_id || undefined);
     }
   }, [document, form]);
 
@@ -77,6 +82,7 @@ export default function DocumentEditModal({ open, document, onClose, onSuccess }
         visibility: values.visibility,
         dept_id: values.dept_id || undefined,
         folder_id: values.folder_id || undefined,
+        kb_id: values.kb_id || undefined,
       });
       message.success('修改成功');
       onSuccess();
@@ -110,7 +116,24 @@ export default function DocumentEditModal({ open, document, onClose, onSuccess }
           />
         </Form.Item>
         <Form.Item name="dept_id" label="所属部门">
-          <Input placeholder="部门 ID（留空则不修改）" />
+          <Select
+            placeholder="选择部门（可选）"
+            allowClear
+            showSearch
+            filterOption={(input, option) =>
+              (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
+            }
+            options={departments}
+          />
+        </Form.Item>
+        <Form.Item name="kb_id" label="所属知识库">
+          <Select
+            style={{ width: '100%' }}
+            placeholder="选择知识库（可选）"
+            allowClear
+            options={kbs}
+            onChange={(val) => setSelectedKbId(val)}
+          />
         </Form.Item>
         <Form.Item name="folder_id" label="所属文件夹">
           <TreeSelect

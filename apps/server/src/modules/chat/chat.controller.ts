@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ChatService } from './chat.service';
 import { ChatDto } from './dto/chat.dto';
+import { TtsDto } from './dto/tts.dto';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 import { UpdateConversationDto } from './dto/update-conversation.dto';
 
@@ -28,7 +29,7 @@ export class ChatController {
     res.setHeader('Connection', 'keep-alive');
 
     const sessionId = dto.sessionId || `sess-${Date.now()}`;
-    const stream = this.chatService.streamAnswer(dto.message, user.id, sessionId, dto.conversationId, dto.streamMessageId);
+    const stream = this.chatService.streamAnswer(dto.message, user.id, sessionId, dto.conversationId);
 
     for await (const chunk of stream) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
@@ -41,7 +42,7 @@ export class ChatController {
   @Post('tts')
   @UseGuards(JwtAuthGuard)
   async synthesizeTts(
-    @Body() dto: { text: string; messageId: string; sessionId: string },
+    @Body() dto: TtsDto,
     @CurrentUser() user: { id: string },
   ) {
     await this.chatService.ttsSynthesize(dto.text, dto.messageId, dto.sessionId);

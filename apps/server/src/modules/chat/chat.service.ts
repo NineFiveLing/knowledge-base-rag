@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { randomUUID } from 'crypto';
+
 import { RAGService } from '../rag/rag.service';
 import { MemoryService } from '../memory/memory.service';
 import { LangfuseService } from '../../common/observability/langfuse.service';
@@ -25,7 +25,7 @@ export class ChatService {
     @InjectRepository(Message) private msgRepo: Repository<Message>,
   ) {}
 
-  async *streamAnswer(message: string, userId: string, sessionId: string, conversationId?: string, streamMessageId?: string) {
+  async *streamAnswer(message: string, userId: string, sessionId: string, conversationId?: string) {
     // 检测"记住xxx"模式 → 写入 Mem0 明确记忆
     if (/^(记住|请记住|帮我记住)/.test(message)) {
       const fact = message.replace(/^(记住|请记住|帮我记住)[，,：:\s]*/, '');
@@ -57,20 +57,6 @@ export class ChatService {
 
     // 先发送对话 ID 事件，前端据此绑定消息归属
     yield { type: 'conversation', conversationId: resolvedConvId, isNew: isNewConv };
-
-    // ── TTS 并行流式输出状态 ──
-    let ttsStarted = false;
-    let ttsConnecting = false;
-    let ttsReady = false;
-    let ttsPaused = false;
-    let textBuffer = '';
-    const TTS_DELAY_CHARS = 5;
-    // 流式 TTS 对应的消息 ID（audioChunk/audioEnd/ttsError 事件据此绑定到前端消息）
-    const actualStreamMsgId = streamMessageId || `stream-${Date.now()}-${randomUUID().slice(0, 8)}`;
-    const voiceSocket = this.voiceGateway.getVoiceSocket(sessionId);
-    if (!voiceSocket) {
-      this.logger.warn(`🔇 TTS 跳过：没有 voice socket 连接 (sessionId=${sessionId})，请确认前端已连接 /voice namespace`);
-    }
 
     // 流式 RAG 回答
     const traceId = this.langfuse.createTrace('chat', { query: message }, userId, sessionId);
@@ -154,30 +140,6 @@ export class ChatService {
         // 非最终答案节点 → 丢弃 token
         if (!currentNode || !ANSWER_NODES.has(currentNode)) continue;
 
-        // TTS 延迟启动 + 流式 feed（仅最终答案节点的文本 token）
-        if (voiceSocket && typeof token === 'string') {
-          if (!ttsStarted) {
-            textBuffer += token;
-            if (textBuffer.length >= TTS_DELAY_CHARS) {
-              ttsStarted = true;
-              ttsConnecting = true;
-              this.startTtsStream(sessionId, textBuffer, actualStreamMsgId).then(() => {
-                ttsConnecting = false;
-                ttsReady = true;
-                // flush 连接期间缓冲的 tokens
-                if (textBuffer) {
-                  this.tts.feedText(sessionId, textBuffer);
-                  textBuffer = '';
-                }
-              });
-            }
-          } else if (ttsReady && !ttsPaused) {
-            this.tts.feedText(sessionId, token);
-          } else if (ttsConnecting) {
-            // TTS 正在连接，继续缓冲 token
-            textBuffer += token;
-          }
-        }
 
         if (sourcesData) {
           fullAnswer += token;
@@ -234,15 +196,6 @@ export class ChatService {
           }
         }
       }
-    }
-
-    // 流结束后 flush 残留 TTS buffer + end TTS
-    if (ttsReady && textBuffer) {
-      this.tts.feedText(sessionId, textBuffer);
-      textBuffer = '';
-    }
-    if (ttsReady || ttsConnecting) {
-      this.tts.endSession(sessionId);
     }
 
     // 流结束后 flush 残留缓冲区
@@ -318,42 +271,6 @@ export class ChatService {
     conv.title = title;
     conv.updated_at = new Date(); // 显式更新时间戳，防止 @UpdateDateColumn 自动更新失效
     return this.convRepo.save(conv);
-  }
-
-  /** 启动 TTS 流式合成（异步，不阻塞 SSE）
-   *  每次回调时实时从 voiceGateway 查找 socket，避免持有旧 socket 引用
-   *  （voice socket 可能在 TTS 期间因网络波动断开重连）
-   *  所有事件 payload 携带 messageId，前端据此将音频绑定到对应消息 */
-  private async startTtsStream(sessionId: string, initialText: string, messageId: string) {
-    try {
-      this.logger.log(`🔊 TTS 开始连接: session=${sessionId} msgId=${messageId}`);
-      await this.tts.startSession(sessionId, {
-        onAudioChunk: (buffer: Buffer) => {
-          const socket = this.voiceGateway.getVoiceSocket(sessionId);
-          if (socket?.connected) {
-            socket.emit('audioChunk', { messageId, buffer });
-          }
-        },
-        onEnd: () => {
-          this.logger.log(`🔊 TTS 合成完成: session=${sessionId}`);
-          const socket = this.voiceGateway.getVoiceSocket(sessionId);
-          if (socket?.connected) {
-            socket.emit('audioEnd', { messageId });
-          }
-        },
-        onError: (err: Error) => {
-          this.logger.error(`TTS 错误 [${sessionId}]: ${err.message}`);
-          const socket = this.voiceGateway.getVoiceSocket(sessionId);
-          if (socket?.connected) {
-            socket.emit('ttsError', { messageId, message: err.message });
-          }
-        },
-      });
-      this.logger.log(`🔊 TTS 已就绪: session=${sessionId} initialText="${initialText.slice(0, 30)}"`);
-      this.tts.feedText(sessionId, initialText);
-    } catch (err) {
-      this.logger.error(`TTS 启动失败 [${sessionId}]: ${(err as Error).message}`);
-    }
   }
 
   /** 单条消息 TTS 合成回放（非流式）

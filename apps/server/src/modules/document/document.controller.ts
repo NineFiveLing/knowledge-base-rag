@@ -45,8 +45,9 @@ export class DocumentController {
     @CurrentUser() user: { id: string },
     @Body('dept_id') deptId: string,
     @Body('folder_id') folderId?: string,
+    @Body('kb_id') kbId?: string,
   ) {
-    return this.docService.uploadStage1(file, user.id, deptId, folderId);
+    return this.docService.uploadStage1(file, user.id, deptId, folderId, kbId);
   }
 
   /** 查询文档列表（带权限过滤，支持分页和条件过滤） */
@@ -75,6 +76,7 @@ export class DocumentController {
       uploader_id: doc.uploader_id,
       dept_id: doc.dept_id,
       folder_id: doc.folder_id,
+      kb_id: doc.kb_id,
       mongo_doc_id: doc.mongo_doc_id,
       rustfs_file_url: doc.rustfs_file_url,
       created_at: doc.created_at,

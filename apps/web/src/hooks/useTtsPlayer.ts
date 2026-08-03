@@ -41,8 +41,8 @@ export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) 
     if (!socket?.connected) return;
     if (!text) return;
 
-    // 停止当前活跃的消息
-    if (activeMessageIdRef.current && activeMessageIdRef.current !== messageId) {
+    // 停止当前活跃的消息（含同 ID 重播 —— 防止重复 AudioContext + 事件监听泄漏）
+    if (activeMessageIdRef.current) {
       stopMessage(activeMessageIdRef.current);
     }
 
@@ -73,7 +73,18 @@ export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) 
 
     const onAudioEnd = (payload: { messageId: string }) => {
       if (payload.messageId !== messageId) return;
-      stopMessage(messageId);
+      // 不立即 close —— 等待已调度的音频帧播放完毕后再清理
+      updateMessageState(messageId, 'idle');
+      const drainMs = Math.max(0, (nextStartTime - audioCtx.currentTime) * 1000 + 300);
+      setTimeout(() => {
+        audioCtx.close().catch(() => {});
+        eventCleanup();
+        messageAudioMapRef.current.delete(messageId);
+        if (activeMessageIdRef.current === messageId) {
+          activeMessageIdRef.current = null;
+          setActiveMessageId(null);
+        }
+      }, drainMs);
     };
 
     const onTtsError = (payload: { messageId: string; message: string }) => {
@@ -108,8 +119,8 @@ export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) 
         body: JSON.stringify({ text, messageId, sessionId: getSessionId() }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: 'TTS 请求失败' }));
-        socket.emit('ttsError', { messageId, message: err.message || 'TTS 请求失败' });
+        stopMessage(messageId);
+        console.warn('TTS 请求失败: HTTP', res.status);
       }
     } catch (err) {
       stopMessage(messageId);
@@ -119,7 +130,8 @@ export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) 
 
   const pauseMessage = useCallback((messageId: string) => {
     const info = messageAudioMapRef.current.get(messageId);
-    if (!info || info.state !== 'playing') return;
+    if (!info) return;
+    // suspend() 幂等，无需 state guard（Map 中 state 字段可能因异步未同步）
     info.audioCtx.suspend().then(() => {
       updateMessageState(messageId, 'paused');
     }).catch(() => {});
@@ -127,7 +139,7 @@ export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) 
 
   const resumeMessage = useCallback((messageId: string) => {
     const info = messageAudioMapRef.current.get(messageId);
-    if (!info || info.state !== 'paused') return;
+    if (!info) return;
     info.audioCtx.resume().then(() => {
       updateMessageState(messageId, 'playing');
     }).catch(() => {});

@@ -21,9 +21,22 @@ export function useVoiceChat(_sessionId: string) {
     socketRef.current = socket;
     setVoiceSocket(socket);
 
-    // 注册应用层 sessionId，使 ChatService 能通过 sessionId 找到此 voice socket
+    // 立即 emit register（Socket.IO 会在连接建立后自动发送缓冲的消息）
+    // 避免连接成功 → on('connect') 回调前 SSE 已启动的竞态
+    if (sessionId) socket.emit('register', sessionId);
+
     socket.on('connect', () => {
+      console.log('[Voice] socket 已连接:', socket.id);
+      // 连接后再次 register 确保服务端收到（幂等）
       if (sessionId) socket.emit('register', sessionId);
+    });
+
+    socket.on('connect_error', (err) => {
+      console.warn('[Voice] socket 连接失败:', err.message);
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.log('[Voice] socket 断开:', reason);
     });
 
     socket.on('asrResult', (data: { text: string; isFinal: boolean; error?: string }) => {

@@ -41,17 +41,12 @@ class ChatStore {
   /** 当前活跃对话 ID */
   activeConvId: string | null = null;
 
-  /** 订阅者（React setState），用于通知组件重渲染 */
-  private subscribers = new Set<() => void>();
+  /** 当前 SSE 流所属的会话 ID（用于 SSE 回调的前后台路由判断） */
+  currentSSESessionConvId: string | null = null;
 
-  subscribe(fn: () => void) {
-    this.subscribers.add(fn);
-    return () => { this.subscribers.delete(fn); };
-  }
-
-  private notify() {
-    this.subscribers.forEach((fn) => fn());
-  }
+  /** 应用层会话 ID —— 仅生成一次，跨路由切换保持不变。
+   *  TTS voice socket 注册和 SSE 流必须使用同一个 sessionId，否则后端 getVoiceSocket 找不到。 */
+  readonly sessionId: string = `sess-${Date.now()}`;
 
   /** 保存当前对话的实时状态 */
   saveLiveState(convId: string, live: ConvLive) {
@@ -88,11 +83,6 @@ class ChatStore {
   /** 设置活跃对话 */
   setActiveConv(convId: string | null) {
     this.activeConvId = convId;
-  }
-
-  /** 触发重新渲染 */
-  triggerRender() {
-    this.notify();
   }
 }
 

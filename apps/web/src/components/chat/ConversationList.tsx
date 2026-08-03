@@ -49,7 +49,8 @@ export default function ConversationList({ activeId, onSelect }: Props) {
   const handleNew = async () => {
     const res = await api.post('/chat/conversations', { title: '新对话' });
     const conv = res.data;
-    await fetchList();
+    // 立即插入列表顶部，不等待后端刷新排序（新建空会话没有消息，updated_at 必定 ≤ 有消息的会话）
+    setConversations((prev) => [conv, ...prev]);
     onSelect(conv.id);
   };
 

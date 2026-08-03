@@ -158,7 +158,7 @@ export class ChatService {
             if (textBuffer.length >= TTS_DELAY_CHARS) {
               ttsStarted = true;
               ttsConnecting = true;
-              this.startTtsStream(sessionId, textBuffer, voiceSocket).then(() => {
+              this.startTtsStream(sessionId, textBuffer).then(() => {
                 ttsConnecting = false;
                 ttsReady = true;
                 // flush 连接期间缓冲的 tokens
@@ -273,7 +273,8 @@ export class ChatService {
 
   /** 新建对话 */
   async createConversation(userId: string, title?: string) {
-    const conv = this.convRepo.create({ user_id: userId, title: title || '新对话' });
+    const now = new Date();
+    const conv = this.convRepo.create({ user_id: userId, title: title || '新对话', created_at: now, updated_at: now });
     return this.convRepo.save(conv);
   }
 
@@ -281,7 +282,7 @@ export class ChatService {
   async listConversations(userId: string, page = 1, pageSize = 20) {
     const [items, total] = await this.convRepo.findAndCount({
       where: { user_id: userId },
-      order: { updated_at: 'DESC' },
+      order: { updated_at: 'DESC', created_at: 'DESC' },
       skip: (page - 1) * pageSize,
       take: pageSize,
     });
@@ -312,28 +313,34 @@ export class ChatService {
     const conv = await this.convRepo.findOne({ where: { id: conversationId, user_id: userId } });
     if (!conv) throw new Error('对话不存在');
     conv.title = title;
+    conv.updated_at = new Date(); // 显式更新时间戳，防止 @UpdateDateColumn 自动更新失效
     return this.convRepo.save(conv);
   }
 
-  /** 启动 TTS 流式合成（异步，不阻塞 SSE） */
-  private async startTtsStream(sessionId: string, initialText: string, socket: any) {
+  /** 启动 TTS 流式合成（异步，不阻塞 SSE）
+   *  每次回调时实时从 voiceGateway 查找 socket，避免持有旧 socket 引用
+   *  （voice socket 可能在 TTS 期间因网络波动断开重连） */
+  private async startTtsStream(sessionId: string, initialText: string) {
     try {
       this.logger.log(`🔊 TTS 开始连接: session=${sessionId}`);
       await this.tts.startSession(sessionId, {
         onAudioChunk: (buffer: Buffer) => {
-          if (socket.connected) {
+          const socket = this.voiceGateway.getVoiceSocket(sessionId);
+          if (socket?.connected) {
             socket.emit('audioChunk', buffer);
           }
         },
         onEnd: () => {
           this.logger.log(`🔊 TTS 合成完成: session=${sessionId}`);
-          if (socket.connected) {
+          const socket = this.voiceGateway.getVoiceSocket(sessionId);
+          if (socket?.connected) {
             socket.emit('audioEnd');
           }
         },
         onError: (err: Error) => {
           this.logger.error(`TTS 错误 [${sessionId}]: ${err.message}`);
-          if (socket.connected) {
+          const socket = this.voiceGateway.getVoiceSocket(sessionId);
+          if (socket?.connected) {
             socket.emit('ttsError', { message: err.message });
           }
         },

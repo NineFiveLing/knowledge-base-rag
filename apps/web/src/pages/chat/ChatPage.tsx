@@ -11,6 +11,15 @@ import type { SourceRef } from '../../components/chat/SourceCard';
 import DocumentDetailDrawer from '../../components/document/DocumentDetailDrawer';
 import { chatStore, type ChatMessage, type ConvLive } from '../../stores/chat.store';
 
+/** 模块级 dispatch：SSE 回调通过此对象更新当前挂载组件的 React state。
+ *  旧组件卸载后 dispatch 被置 null，SSE 回调自动降级为仅写 chatStore。
+ *  新组件挂载后重新赋值，SSE 回调恢复对 React state 的更新。 */
+let chatDispatch: {
+  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+  setStreaming: React.Dispatch<React.SetStateAction<string>>;
+  setThinking: React.Dispatch<React.SetStateAction<boolean>>;
+} | null = null;
+
 /** AI 问答页面：左侧对话列表 + 右侧流式 SSE 聊天区 + 语音输入支持 */
 export default function ChatPage() {
   // ── 当前展示的对话 state ──
@@ -23,7 +32,8 @@ export default function ChatPage() {
   const [thinking, setThinking] = useState(false);
 
   const { sendMessage, abortConv } = useSSE();
-  const sessionId = useRef(`sess-${Date.now()}`).current;
+  // 使用 chatStore.sessionId 确保跨路由切换不变化 —— voice socket 和 SSE 必须共用一个 sessionId
+  const sessionId = chatStore.sessionId;
   const { socket: voiceSocket, isRecording, asrText, triggerMessage, connect, startRecording, stopRecording, clearTrigger } = useVoiceChat(sessionId);
   const { startPlayer, stopPlayer } = useTtsPlayer(voiceSocket);
 
@@ -42,16 +52,27 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // ── 路由切回时从 store 恢复状态（防止消息消失） ──
+  // 注意：不能使用 activeConvRef.current 做跳过判断 —— React 18 StrictMode 会保留
+  // useRef 值跨越双挂载周期，导致第二次挂载时因 ref 已设置而跳过恢复。
   useEffect(() => {
     const storedConvId = chatStore.activeConvId;
-    if (storedConvId && storedConvId !== activeConvRef.current) {
+    console.log(`[ChatPage] 恢复检查: storedConvId=${storedConvId} activeConvRef=${activeConvRef.current} dispatcher=${!!chatDispatch}`);
+    if (storedConvId) {
       const live = chatStore.convLiveMap.get(storedConvId);
-      if (live) {
+      const msgs = chatStore.convMessagesMap.get(storedConvId);
+      console.log(`[ChatPage] 恢复数据: convId=${storedConvId} msgsLen=${msgs?.length ?? 0} liveExists=${!!live} liveStreaming=${live?.streaming?.length ?? 0}chars`);
+      // 若缓存中已有 assistant 消息 → 对话已完成，清除残留的 streaming/thinking
+      const hasAssistantMsg = msgs && msgs.length > 0 && msgs[msgs.length - 1]?.role === 'assistant';
+      console.log(`[ChatPage] 恢复判断: hasAssistantMsg=${hasAssistantMsg}`);
+      if (live && !hasAssistantMsg) {
         setStreaming(live.streaming);
         setThinking(live.thinking);
         sourcesRef.current = live.sources;
+      } else if (hasAssistantMsg) {
+        setStreaming('');
+        setThinking(false);
+        sourcesRef.current = [];
       }
-      const msgs = chatStore.convMessagesMap.get(storedConvId);
       if (msgs && msgs.length > 0) {
         setMessages(msgs);
       }
@@ -60,6 +81,13 @@ export default function ChatPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── 注册模块级 dispatch，供 SSE 回调在组件挂载后更新 React state ──
+  // 组件卸载时置 null，SSE 回调自动降级为仅写 chatStore
+  useEffect(() => {
+    chatDispatch = { setMessages, setStreaming, setThinking };
+    return () => { chatDispatch = null; };
+  });
 
   // ── 自动滚动到最新消息（RAF 节流，流式期间 instant 避免 smooth 堆积卡顿） ──
   const scrollRafRef = useRef<number | null>(null);
@@ -81,15 +109,23 @@ export default function ChatPage() {
   }, [messages, streaming, thinking, scrollToBottom]);
 
   // ── 组件卸载时保存当前状态到 chatStore（防止路由切换丢失） ──
+  // 仅在有实际数据时保存，避免 React 18 StrictMode 双挂载的中间卸载用空状态覆盖有效数据
   useEffect(() => {
     return () => {
       if (activeConvRef.current) {
-        chatStore.convLiveMap.set(activeConvRef.current, {
-          streaming: streamingRef.current,
-          thinking: thinkingRef.current,
-          sources: sourcesRef.current,
-        });
         const msgs = messagesRef.current;
+        const hasStreaming = streamingRef.current.length > 0;
+        const hasThinking = thinkingRef.current;
+        console.log(`[ChatPage] 卸载保存: convId=${activeConvRef.current} msgsLen=${msgs.length} streaming=${streamingRef.current.length}chars thinking=${hasThinking} sourcesCount=${sourcesRef.current.length}`);
+        // 仅在有流式内容或思考状态时更新 live 状态
+        if (hasStreaming || hasThinking) {
+          chatStore.convLiveMap.set(activeConvRef.current, {
+            streaming: streamingRef.current,
+            thinking: thinkingRef.current,
+            sources: sourcesRef.current,
+          });
+        }
+        // 仅在有消息时保存消息缓存，防止空数组覆盖有效数据
         if (msgs.length > 0) {
           chatStore.convMessagesMap.set(activeConvRef.current, msgs);
         }
@@ -119,7 +155,16 @@ export default function ChatPage() {
     if (!text || streamingRef.current) return;
     if (!voiceText) setInput('');
 
-    currentSSEConvRef.current = activeConvRef.current;
+    // 捕获当前会话 ID 到闭包（每个 SSE 流绑定自己的 convId，不受后续其他对话
+    // 发送消息时对 chatStore.currentSSESessionConvId 的覆盖影响）。
+    // 使用 let 而非 const：新对话首次发送无 convId，后端创建后通过 onConversation
+    // 回调更新此值，同一条 SSE 流的后续 onToken/onDone 即可路由到正确的 convId。
+    let sseConvId = activeConvRef.current;
+    chatStore.currentSSESessionConvId = sseConvId;
+    currentSSEConvRef.current = sseConvId;
+
+    /** SSE 事件所属会话是否在前台展示（闭包捕获 sseConvId，隔离多 SSE 流） */
+    const isForeground = () => chatStore.activeConvId === sseConvId;
 
     // 用户消息（幂等守卫防止重复添加）
     setMessages((prev) => {
@@ -127,7 +172,7 @@ export default function ChatPage() {
       if (last?.role === 'user' && last?.content === text) return prev;
       return [...prev, { role: 'user', content: text }];
     });
-    // 同步写入 chatStore，防止路由切换后用户消息丢失
+    // 同步写入 chatStore
     if (activeConvRef.current) {
       chatStore.appendMessage(activeConvRef.current, { role: 'user', content: text });
       chatStore.convLiveMap.set(activeConvRef.current, { streaming: '', thinking: true, sources: [] });
@@ -137,7 +182,7 @@ export default function ChatPage() {
     promptContextRef.current = null;
     setThinking(true);
 
-    // 有新消息时刷新对话列表（修复已存在对话不更新排序的 bug）
+    // 有新消息时刷新对话列表
     setTimeout(() => {
       window.dispatchEvent(new CustomEvent('refresh-conversations'));
     }, 100);
@@ -145,95 +190,94 @@ export default function ChatPage() {
     await sendMessage(
       text,
       sessionId,
-      // onToken
+      // ── onToken ──
       (token) => {
-        if (activeConvRef.current !== currentSSEConvRef.current) {
-          // 后台 SSE：更新 live map
-          const key = currentSSEConvRef.current || '__orphan__';
-          const live = chatStore.convLiveMap.get(key) || { streaming: '', thinking: false, sources: [] };
-          live.thinking = false;
-          live.streaming += token;
-          chatStore.convLiveMap.set(key, live);
-          return;
+        const key = sseConvId || '__orphan__';
+        // 始终更新 chatStore live（模块级，卸载不丢）
+        const live = chatStore.convLiveMap.get(key) || { streaming: '', thinking: false, sources: [] };
+        live.thinking = false;
+        live.streaming += token;
+        chatStore.convLiveMap.set(key, live);
+
+        // 若当前在前台，同时更新 React state
+        if (isForeground() && chatDispatch) {
+          chatDispatch.setThinking(false);
+          chatDispatch.setStreaming((prev) => prev + token);
         }
-        setThinking(false);
-        setStreaming((prev) => prev + token);
+        // 仅在前 3 个 token 打印，避免刷屏
+        if (live.streaming.length <= 3) {
+          console.log(`[SSE] onToken: key=${key} isFg=${isForeground()} dispatch=${!!chatDispatch} streamingLen=${live.streaming.length}`);
+        }
       },
-      // onDone
+      // ── onDone ──
       () => {
-        if (activeConvRef.current !== currentSSEConvRef.current) {
-          // 后台 SSE 完成：将消息持久化到缓存
-          const key = currentSSEConvRef.current || '__orphan__';
-          const live = chatStore.convLiveMap.get(key);
-          if (live?.streaming) {
-            chatStore.appendMessage(key, { role: 'assistant' as const, content: live.streaming, sources: live.sources?.length ? live.sources : undefined, promptContext: promptContextRef.current ?? undefined });
-          }
-          chatStore.convLiveMap.delete(key);
-          // 后台流结束后也刷新列表
-          setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('refresh-conversations'));
-          }, 300);
-          return;
-        }
-        setThinking(false);
-        // ⚠️ 不在 setStreaming updater 内调用 setMessages
-        // React StrictMode 会双重调用 updater，导致 setMessages 排队两次 → 重复消息
-        const finalText = streamingRef.current;
-        const finalSources = sourcesRef.current.length > 0 ? [...sourcesRef.current] : undefined;
+        const key = sseConvId || '__orphan__';
+        const live = chatStore.convLiveMap.get(key);
+        const finalText = live?.streaming || streamingRef.current;
+        const finalSources = (live?.sources?.length ? live.sources : sourcesRef.current.length > 0 ? [...sourcesRef.current] : undefined);
         const finalPromptCtx = promptContextRef.current;
+
+        console.log(`[SSE] onDone: key=${key} isFg=${isForeground()} dispatch=${!!chatDispatch} finalTextLen=${finalText?.length ?? 0} liveStreaming=${live?.streaming?.length ?? 0} streamRefLen=${streamingRef.current?.length ?? 0}`);
+
+        // 始终持久化到 chatStore
         if (finalText) {
-          setMessages((msgs) => {
-            // 避免 fetch ↔ onDone 竞态重复：
-            // 若 fetch 已恢复持久化的 assistant 消息（末条已是 assistant），
-            // 说明后端 saveMessage 在 onDone 前完成，不再追加第二条
-            if (msgs[msgs.length - 1]?.role === 'assistant') return msgs;
-            return [...msgs, { role: 'assistant', content: finalText, sources: finalSources, promptContext: finalPromptCtx ?? undefined }];
-          });
-          // 同步到缓存
-          if (currentSSEConvRef.current) {
-            chatStore.appendMessage(currentSSEConvRef.current, { role: 'assistant', content: finalText, sources: finalSources, promptContext: finalPromptCtx ?? undefined });
-          }
+          chatStore.appendMessage(key, { role: 'assistant' as const, content: finalText, sources: finalSources, promptContext: finalPromptCtx ?? undefined });
         }
-        setStreaming('');
-        // 流结束后刷新对话列表
+        chatStore.convLiveMap.delete(key);
+
+        // 若当前在前台，同时更新 React state
+        if (isForeground() && chatDispatch) {
+          chatDispatch.setThinking(false);
+          if (finalText) {
+            chatDispatch.setMessages((msgs) => {
+              if (msgs[msgs.length - 1]?.role === 'assistant') return msgs;
+              return [...msgs, { role: 'assistant', content: finalText, sources: finalSources, promptContext: finalPromptCtx ?? undefined }];
+            });
+          }
+          chatDispatch.setStreaming('');
+        }
+        // 流结束后刷新列表
         setTimeout(() => {
           window.dispatchEvent(new CustomEvent('refresh-conversations'));
         }, 300);
       },
-      // onSources
+      // ── onSources ──
       (srcs) => {
-        if (activeConvRef.current !== currentSSEConvRef.current) {
-          const key = currentSSEConvRef.current || '__orphan__';
-          const live = chatStore.convLiveMap.get(key);
-          if (live) {
-            live.sources = srcs;
-            chatStore.convLiveMap.set(key, live);
-          }
-          return;
+        const key = sseConvId || '__orphan__';
+        // 始终更新 chatStore live
+        const live = chatStore.convLiveMap.get(key);
+        if (live) {
+          live.sources = srcs;
+          chatStore.convLiveMap.set(key, live);
         }
-        sourcesRef.current = srcs;
+        // 若当前在前台，同时更新 ref
+        if (isForeground()) {
+          sourcesRef.current = srcs;
+        }
       },
-      currentSSEConvRef.current,
-      // onConversation — SSE 首个事件，告知新创建的对话 ID
+      sseConvId,
+      // ── onConversation ──
       (newConvId, isNew) => {
-        if (isNew && !currentSSEConvRef.current) {
-          // 同步更新两个 ref，避免 onToken/onDone 因 setState 异步而错误路由到后台
+        if (isNew && !sseConvId) {
+          // 更新闭包捕获的 sseConvId，使本 SSE 流的后续 onToken/onDone
+          // 路由到正确的 convId（而非 fallback '__orphan__'）
+          sseConvId = newConvId;
           currentSSEConvRef.current = newConvId;
           activeConvRef.current = newConvId;
           chatStore.setActiveConv(newConvId);
+          chatStore.currentSSESessionConvId = newConvId;
           setActiveConvId(newConvId);
-          // 刷新列表（新建会话时）
           setTimeout(() => {
             window.dispatchEvent(new CustomEvent('refresh-conversations'));
           }, 300);
         }
       },
-      // onPromptContext — 展示增强后的提示词（包含检索记忆信息）
+      // ── onPromptContext ──
       (ctx) => {
         promptContextRef.current = ctx;
       },
     );
-  }, [sendMessage, sessionId]); // sendMessage / sessionId 均为稳定引用
+  }, [sendMessage, sessionId]);
 
   // ── ASR 语音触发 ──
   useEffect(() => {
@@ -247,6 +291,9 @@ export default function ChatPage() {
   const handleSelectConv = useCallback(async (convId: string) => {
     // 点击当前对话 — 无需切换
     if (convId === activeConvRef.current) return;
+
+    // 清空输入框（防止切换会话时输入文字残留到新会话）
+    setInput('');
 
     // 不中断旧对话的 SSE！保存当前 live 状态 + messages 缓存
     if (activeConvRef.current) {
@@ -292,8 +339,13 @@ export default function ChatPage() {
         content: m.content,
         sources: m.sources || undefined,
       }));
-      chatStore.convMessagesMap.set(convId, msgs);
-      setMessages(msgs);
+      // 若 chatStore 中有更完整的消息（SSE onDone 已写入 assistant 但 DB 尚未落盘），
+      // 优先保留 chatStore 数据，避免 API 返回的未完成数据覆盖完整数据
+      const stored = chatStore.convMessagesMap.get(convId);
+      const preferStore = stored && stored.length > msgs.length;
+      const finalMsgs = preferStore ? stored! : msgs;
+      if (!preferStore) chatStore.convMessagesMap.set(convId, msgs);
+      setMessages(finalMsgs);
     } catch {
       antMsg.error('加载对话失败');
     } finally {

@@ -23,10 +23,9 @@ export class TencentTtsProvider implements TtsProvider {
   ) {}
 
   /** 生成 HMAC-SHA1 签名，返回完整 WSS URL */
-  private buildUrl(): string {
+  private buildUrl(sessionId: string): string {
     const timestamp = Math.floor(Date.now() / 1000);
     const expired = timestamp + 86400;
-    const sessionId = randomUUID();
 
     const params: Record<string, string> = {
       Action: 'TextToStreamAudioWSv2',
@@ -58,9 +57,10 @@ export class TencentTtsProvider implements TtsProvider {
   }
 
   async start(callbacks: TtsCallbacks): Promise<TtsSession> {
-    const url = this.buildUrl();
-    const ws = new WebSocket(url);
+    // 先生成 sessionId，确保 URL 签名和后续 WebSocket 消息中的 session_id 一致
     const sessionId = randomUUID();
+    const url = this.buildUrl(sessionId);
+    const ws = new WebSocket(url);
 
     let ready = false;
     let ended = false;
@@ -100,13 +100,26 @@ export class TencentTtsProvider implements TtsProvider {
       }, 10000);
 
       ws.addEventListener('open', () => {
-        this.logger.log(`腾讯云 TTS WebSocket 已连接: session=${sessionId}`);
+        this.logger.log(`腾讯云 TTS WebSocket 已连接: session=${sessionId} urlSigned=${url.substring(0, 80)}...`);
       });
 
-      ws.addEventListener('message', (event) => {
+      ws.addEventListener('message', async (event) => {
         // 二进制帧 = PCM 音频数据
         if (typeof event.data !== 'string') {
-          const buffer = Buffer.from(event.data as ArrayBuffer);
+          // Node.js v24 undici WebSocket 二进制帧可能是 Blob，不是 ArrayBuffer
+          let arrayBuffer: ArrayBuffer | SharedArrayBuffer;
+          if (event.data instanceof Blob) {
+            arrayBuffer = await event.data.arrayBuffer();
+          } else if (event.data instanceof ArrayBuffer) {
+            arrayBuffer = event.data;
+          } else {
+            // Buffer（旧版 Node.js ws 库）
+            arrayBuffer = (event.data as Buffer).buffer.slice(
+              (event.data as Buffer).byteOffset,
+              (event.data as Buffer).byteOffset + (event.data as Buffer).byteLength,
+            );
+          }
+          const buffer = Buffer.from(arrayBuffer as ArrayBuffer);
           if (buffer.length > 0) {
             callbacks.onAudioChunk(buffer);
           }
@@ -116,23 +129,54 @@ export class TencentTtsProvider implements TtsProvider {
         // JSON 事件
         try {
           const msg = JSON.parse(event.data as string);
+          this.logger.log(`📨 腾讯云 TTS 消息: ${JSON.stringify(msg).substring(0, 500)}`);
 
-          // 鉴权成功
+          // 首次 success 即表示握手完成，服务端已就绪（含可能的 ready 字段）
           if (msg.code === 0 && msg.message === 'success') {
+            if (!settled) {
+              clearTimeout(timeout);
+              settled = true;
+              this.logger.log(`腾讯云 TTS 就绪 (success): session=${sessionId} ready=${msg.ready}`);
+              // 若 success 消息里直接有 ready=1，立即 flush
+              if (msg.ready === 1) {
+                flushPending();
+              }
+              resolve({
+                feedText: (text: string) => {
+                  if (ended) return;
+                  if (!ready) {
+                    pendingText.push(text);
+                    return;
+                  }
+                  sendAction('ACTION_SYNTHESIS', text);
+                },
+                end: () => {
+                  if (ended) return;
+                  ended = true;
+                  if (!ready) flushPending();
+                  sendAction('ACTION_COMPLETE');
+                },
+                cancel: () => {
+                  if (ended) return;
+                  ended = true;
+                  ws.close();
+                },
+              });
+            }
+            // 后续 success 可能是合成子句确认（含 final/subtitles 等），忽略
             return;
           }
 
-          // 服务端就绪，可开始输入文本
-          if (msg.ready === 1) {
+          // 兼容旧逻辑：ready 信号可能独立出现（非 success 包装）
+          if (msg.ready === 1 && !settled) {
             clearTimeout(timeout);
-            this.logger.log(`腾讯云 TTS 就绪: session=${sessionId}`);
+            settled = true;
+            flushPending();
+            this.logger.log(`腾讯云 TTS 就绪 (ready): session=${sessionId}`);
             resolve({
               feedText: (text: string) => {
                 if (ended) return;
-                if (!ready) {
-                  pendingText.push(text);
-                  return;
-                }
+                if (!ready) { pendingText.push(text); return; }
                 sendAction('ACTION_SYNTHESIS', text);
               },
               end: () => {
@@ -169,7 +213,7 @@ export class TencentTtsProvider implements TtsProvider {
             callbacks.onError(new Error(`TTS 合成失败: ${errMsg}`));
           }
         } catch {
-          // 解析失败忽略
+          this.logger.warn(`腾讯云 TTS 无法解析消息: ${String(event.data).substring(0, 100)}`);
         }
       });
 

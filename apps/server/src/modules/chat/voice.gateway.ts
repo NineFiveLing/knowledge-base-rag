@@ -28,11 +28,18 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   /** 供 ChatService 获取 voice socket（sessionId = 应用层 sessionId） */
   getVoiceSocket(sessionId: string): Socket | undefined {
     const clientId = this.sessionIdToClient.get(sessionId);
-    if (clientId) {
-      return this.server?.sockets?.sockets?.get(clientId);
+    // @WebSocketServer() 对于 namespaced gateway 返回的 server 就是 Namespace 实例
+    // Namespace.sockets 已经是 Map<string, Socket>，不需要再 .sockets 一层
+    const sockets: Map<string, Socket> | undefined = this.server?.sockets as any;
+    if (clientId && sockets?.has(clientId)) {
+      return sockets.get(clientId);
     }
     // 兼容旧逻辑：直接作为 client.id 查找
-    return this.server?.sockets?.sockets?.get(sessionId);
+    if (sessionId && sockets?.has(sessionId)) {
+      return sockets.get(sessionId);
+    }
+    this.logger.warn(`getVoiceSocket 未找到: sessionId=${sessionId} clientId=${clientId} socketsCount=${sockets?.size ?? 0}`);
+    return undefined;
   }
 
   /** 注册应用层 sessionId → Socket.IO client.id 映射 */

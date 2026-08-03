@@ -2,6 +2,9 @@ import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { AgentStateType } from '../state';
 import { LangfuseService } from '../../../common/observability/langfuse.service';
+import { Logger } from '@nestjs/common';
+
+const logger = new Logger('RAG:IntentClassifier');
 
 const INTENT_PROMPT = `你是企业知识库助手的意图分类器。分析用户问题，归类为：
 
@@ -66,6 +69,7 @@ export function createIntentClassifier(llm: ChatOpenAI, langfuse?: LangfuseServi
       langfuse.endSpan(span, { intent, latencyMs: Date.now() - startTime });
     }
 
+    logger.debug(`📌 [intent_classifier] 进入 → 意图="${intent}" query="${content.slice(0, 60)}" latency=${Date.now() - startTime}ms`);
     return { intent };
   };
 }

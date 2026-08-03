@@ -1,6 +1,9 @@
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { AgentStateType } from '../state';
 import { LangfuseService } from '../../../common/observability/langfuse.service';
+import { Logger } from '@nestjs/common';
+
+const logger = new Logger('RAG:Retrieval');
 
 /** 创建检索执行节点：根据 LLM 选中的工具并行执行检索 */
 export function createRetrievalNode(
@@ -20,6 +23,11 @@ export function createRetrievalNode(
     const toolMsgs: ToolMessage[] = [];
     // 累积所有检索轮次的 chunk，确保 agent 路径也能填充 retrievedChunks
     const aggregatedChunks = [...state.retrievedChunks];
+
+    const toolNames = lastMsg.tool_calls?.map((tc) => tc.name) || [];
+    logger.debug(
+      `📌 [retrieval_tools] 进入 | 执行工具=[${toolNames.join(', ')}] 剩余轮次=${state.toolCallsRemaining}`,
+    );
 
     if (lastMsg.tool_calls) {
       for (const call of lastMsg.tool_calls) {
@@ -49,11 +57,18 @@ export function createRetrievalNode(
                 });
               }
             }
+            logger.debug(
+              `  🔧 ${call.name}("${q.slice(0, 50)}") → ${items.length}条结果 | latency=${Date.now() - toolStart}ms`,
+            );
           } catch { /* JSON 解析失败不影响主流程 */ }
           toolMsgs.push(new ToolMessage({ content: result, tool_call_id: call.id! }));
         }
       }
     }
+
+    logger.debug(
+      `📌 [retrieval_tools] 完成 | 累积chunks=${aggregatedChunks.length} 剩余轮次→${state.toolCallsRemaining - 1}`,
+    );
 
     return {
       messages: toolMsgs,

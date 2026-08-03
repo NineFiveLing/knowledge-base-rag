@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from "@nestjs/common";
+import { Injectable, OnModuleInit, Logger } from "@nestjs/common";
 import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
 import { ConfigService } from "@nestjs/config";
 import { HumanMessage } from "@langchain/core/messages";
@@ -24,6 +24,7 @@ import { withLLMRetry } from "../../common/utils/retry.util";
 /** RAG 服务：组装完整的 LangGraph Agentic RAG 工作流 */
 @Injectable()
 export class RAGService implements OnModuleInit {
+  private readonly logger = new Logger("RAG:Service");
   private graph: any;
   private llm: ChatOpenAI;
   private embeddings: OpenAIEmbeddings;
@@ -130,19 +131,27 @@ export class RAGService implements OnModuleInit {
   }
 
   private async directAnswer(state: any) {
+    this.logger.debug(`📌 [direct_answer] 进入 | 直接LLM回答（闲聊/记忆指令）`);
     const res = await withLLMRetry(() => this.llm.invoke(state.messages));
+    this.logger.debug(`📌 [direct_answer] 完成 | answer="${String(res.content).slice(0, 100)}"`);
     return { finalAnswer: String(res.content), messages: [res] };
   }
 
   private async simpleRetrieval(state: any) {
     const userMsg = state.messages[state.messages.length - 1];
     const query = typeof userMsg.content === "string" ? userMsg.content : "";
+    this.logger.debug(`📌 [simple_retrieval] 进入 | query="${query.slice(0, 60)}"`);
+
     const emb = await this.embed(query);
     const result = await this.search.searchWithThreshold(
       query,
       emb,
       undefined,
       { useES: false, useNeo4j: false },
+    );
+
+    this.logger.debug(
+      `📌 [simple_retrieval] 完成 | 检索结果=${result.results.length}条 degraded=${result.degraded}`,
     );
 
     // 将完整 SearchResult 结构写入 state，保留 degraded/fallbackMessage

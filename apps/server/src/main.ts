@@ -8,7 +8,10 @@ import { AppModule } from './app.module';
  * 启动 HTTP 服务，配置全局管道和 CORS
  */
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    // 启用 debug 级别日志，方便观察 RAG 节点流转
+    logger: ['log', 'error', 'warn', 'debug', 'verbose'],
+  });
 
   // 全局路径前缀：所有 API 路由以 /api 开头
   app.setGlobalPrefix('api');

@@ -43,6 +43,29 @@ export class RedisService implements OnModuleInit {
     return raw ? JSON.parse(raw) : [];
   }
 
+  /** 清空会话历史 */
+  async clearSessionHistory(sessionId: string) {
+    await this.client.del(`session:${sessionId}:history`);
+  }
+
+  /** 获取会话运行中摘要（增量压缩） */
+  async getSessionSummary(sessionId: string): Promise<string> {
+    const raw = await this.client.get(`session:${sessionId}:summary`);
+    return raw || '';
+  }
+
+  /** 设置会话运行中摘要 */
+  async setSessionSummary(sessionId: string, summary: string, ttl: number = 1800) {
+    if (summary) {
+      await this.client.setex(`session:${sessionId}:summary`, ttl, summary);
+    }
+  }
+
+  /** 清空会话摘要 */
+  async clearSessionSummary(sessionId: string) {
+    await this.client.del(`session:${sessionId}:summary`);
+  }
+
   /** 缓存检索结果 */
   async cacheSearchResult(
     queryHash: string,

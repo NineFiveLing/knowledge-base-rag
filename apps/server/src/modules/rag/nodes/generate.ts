@@ -5,6 +5,9 @@ import { AgentStateType } from '../state';
 import { MemoryService } from '../../memory/memory.service';
 import { LangfuseService } from '../../../common/observability/langfuse.service';
 import { Document } from '../../document/entities/document.entity';
+import { Logger } from '@nestjs/common';
+
+const logger = new Logger('RAG:Generate');
 
 const ANSWER_PROMPT = `基于检索到的企业知识库内容回答用户问题。要求：
 - 准确、简洁，涉及流程的用步骤式说明
@@ -67,10 +70,24 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langf
 
     const ctx = await memory.buildPromptContext(state.sessionId, state.userId);
 
-    const contextParts = [ctx.systemContext];
+    // 组装上下文：增量摘要 + 长期记忆 + 检索结果 + 近期对话
+    const contextParts = [ctx.summary, ctx.systemContext].filter(Boolean);
     if (deduped.length > 0) {
       contextParts.push(`## 检索结果\n${deduped.map((c) => `---\n${c.chunk_text}`).join('\n\n')}`);
     }
+    if (ctx.history) {
+      contextParts.push(`## 近期对话\n${ctx.history}`);
+    }
+
+    // ── 调试输出：生成阶段的上下文情况 ──
+    logger.debug(
+      `📌 [generate_answer] 进入 | ` +
+      `检索chunks=${state.retrievedChunks.length}条 去重后=${deduped.length}条 ` +
+      `降级=${state.searchDegraded} | ` +
+      `摘要: ${ctx.summary.length}字符 | ` +
+      `近期历史: ${ctx.history.length}字符 | ` +
+      `长期记忆: ${ctx.systemContext.length}字符`,
+    );
 
     const system = `${ANSWER_PROMPT}\n\n${contextParts.filter(Boolean).join('\n')}`;
     const userMsg = state.messages.filter((m) => m.getType() === 'human').slice(-1)[0];

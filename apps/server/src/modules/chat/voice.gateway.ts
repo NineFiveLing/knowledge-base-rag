@@ -9,6 +9,7 @@ import { TtsService } from './services/tts.service';
 
 /**
  * 语音 WebSocket 网关：音频上行 → ASR → 前端触发 SSE 文字聊天
+ * 音频下行：ChatService SSE 流 → TTS → 前端 audioChunk 播放
  * 命名空间 /voice
  */
 @WebSocketGateway({ namespace: '/voice', cors: { origin: '*' } })
@@ -21,6 +22,11 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly asrService: AsrService,
     private readonly ttsService: TtsService,
   ) {}
+
+  /** 供 ChatService 获取 voice socket（sessionId = Socket.IO client.id） */
+  getVoiceSocket(sessionId: string): Socket | undefined {
+    return this.server?.sockets?.sockets?.get(sessionId);
+  }
 
   handleConnection(client: Socket) {
     this.logger.log(`语音客户端连接: ${client.id}`);
@@ -82,12 +88,18 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  /** 接收 TTS 请求 */
-  @SubscribeMessage('ttsRequest')
-  async handleTts(client: Socket, text: string): Promise<void> {
-    for await (const audioChunk of this.ttsService.synthesizeStream(text)) {
-      client.emit('audioChunk', audioChunk);
-    }
-    client.emit('audioEnd');
+  /** 暂停 TTS 合成 */
+  @SubscribeMessage('pauseTts')
+  handlePauseTts(client: Socket): void {
+    this.logger.log(`TTS 暂停: ${client.id}`);
+    this.ttsService.cancelSession(client.id);
+    client.emit('ttsPaused', {});
+  }
+
+  /** 恢复 TTS 合成 */
+  @SubscribeMessage('resumeTts')
+  handleResumeTts(client: Socket): void {
+    this.logger.log(`TTS 恢复: ${client.id}`);
+    client.emit('ttsResumed', {});
   }
 }

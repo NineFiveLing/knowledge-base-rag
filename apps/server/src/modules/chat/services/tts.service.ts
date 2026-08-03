@@ -1,63 +1,63 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { TtsProvider, TtsSession, TtsCallbacks } from './tts/tts-provider.interface';
+import { createTtsProvider } from './tts/tts-provider.factory';
 
 /**
- * 阿里云 DashScope 语音合成服务
- * 调用 OpenAI 兼容 /audio/speech API，按句子切分流式合成。
+ * TTS 编排服务
+ *
+ * 管理多会话 TTS 生命周期，通过 Provider 模式支持阿里云 NLS 流式合成。
+ * 会话以 sessionId 为 key（与 chat session 对应）。
  */
 @Injectable()
 export class TtsService {
   private readonly logger = new Logger(TtsService.name);
-  private readonly apiKey: string;
-  private readonly baseUrl: string;
-  private readonly model: string;
+  private readonly provider: TtsProvider;
+  private readonly sessions = new Map<string, TtsSession>();
 
-  constructor(config: ConfigService) {
-    this.apiKey = config.get('ALIYUN_API_KEY') || '';
-    this.baseUrl = config.get('ALIYUN_BASE_URL') || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-    this.model = config.get('ALIYUN_TTS_MODEL', 'cosyvoice-v1');
+  constructor(private readonly config: ConfigService) {
+    this.provider = createTtsProvider(config);
   }
 
-  /** 将文字转为 MP3 音频 Buffer（逐句流式返回） */
-  async *synthesizeStream(text: string): AsyncGenerator<Buffer> {
-    // 按标点断句，保持句末标点附着在句子上
-    const sentences = text
-      .split(/(?<=[。！？；\n])/g)
-      .map(s => s.trim())
-      .filter(s => s.length > 0);
-
-    for (const sentence of sentences) {
-      try {
-        const response = await fetch(`${this.baseUrl}/audio/speech`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: this.model,
-            input: sentence,
-            voice: 'zh-CN-Xiaoxiao',
-            response_format: 'mp3',
-          }),
-        });
-
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(`TTS API 错误 (${response.status}): ${errText.slice(0, 200)}`);
-        }
-
-        const arrayBuffer = await response.arrayBuffer();
-        const audioBuffer = Buffer.from(arrayBuffer);
-
-        if (audioBuffer.length > 0) {
-          this.logger.log(`TTS 合成: "${sentence.slice(0, 30)}..." (${audioBuffer.length} bytes)`);
-          yield audioBuffer;
-        }
-      } catch (err) {
-        this.logger.error(`TTS 合成失败: "${sentence.slice(0, 30)}..." — ${(err as Error).message}`);
-        // 单句失败不中断，跳过继续
-      }
+  /** 开始合成会话 */
+  async startSession(sessionId: string, callbacks: TtsCallbacks): Promise<void> {
+    if (this.sessions.has(sessionId)) {
+      this.logger.warn(`TTS 会话 ${sessionId} 已存在，先结束旧会话`);
+      this.cancelSession(sessionId);
     }
+
+    try {
+      const session = await this.provider.start(callbacks);
+      this.sessions.set(sessionId, session);
+      this.logger.log(`TTS 会话开始: ${sessionId}`);
+    } catch (err) {
+      this.logger.error(`TTS 会话启动失败: ${sessionId} — ${(err as Error).message}`);
+      throw err;
+    }
+  }
+
+  /** 送入文本（流式 feed） */
+  feedText(sessionId: string, text: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.feedText(text);
+  }
+
+  /** 结束合成 */
+  endSession(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.end();
+    this.sessions.delete(sessionId);
+    this.logger.log(`TTS 会话结束: ${sessionId}`);
+  }
+
+  /** 取消合成（暂停用，不触发 onEnd） */
+  cancelSession(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.cancel();
+    this.sessions.delete(sessionId);
+    this.logger.log(`TTS 会话取消: ${sessionId}`);
   }
 }

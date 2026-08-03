@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Table, Button, Popconfirm, Tag, Space, App } from 'antd';
+import { Table, Button, Popconfirm, Tag, Space, App, Select, TreeSelect } from 'antd';
 import {
   EyeOutlined, DownloadOutlined, EditOutlined,
   SwapOutlined, CloseCircleOutlined, DeleteOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import type { DataNode } from 'antd/es/tree';
 import api from '../../services/api';
 import SearchBar from '../../components/document/SearchBar';
 import DocumentEditModal from '../../components/document/DocumentEditModal';
@@ -56,6 +57,12 @@ export default function DocumentManagePage() {
   const [replaceDoc, setReplaceDoc] = useState<any>(null);
   const [detailDocId, setDetailDocId] = useState<string | null>(null);
 
+  // KB + 文件夹筛选
+  const [kbs, setKbs] = useState<{ value: string; label: string }[]>([]);
+  const [selectedKbId, setSelectedKbId] = useState<string | undefined>();
+  const [selectedFolderId, setSelectedFolderId] = useState<string | undefined>();
+  const [folderTree, setFolderTree] = useState<DataNode[]>([]);
+
   const { message } = App.useApp();
   const navigate = useNavigate();
 
@@ -66,6 +73,8 @@ export default function DocumentManagePage() {
       if (filters.keyword) params.keyword = filters.keyword;
       if (filters.type) params.type = filters.type;
       if (filters.status) params.status = filters.status;
+      if (selectedKbId) params.kb_id = selectedKbId;
+      if (selectedFolderId) params.folder_id = selectedFolderId;
       const { data } = await api.get('/documents', { params });
       setDocuments(data.items || []);
       setTotal(data.total || 0);
@@ -74,9 +83,29 @@ export default function DocumentManagePage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, filters]);
+  }, [page, pageSize, filters, selectedKbId, selectedFolderId]);
 
   useEffect(() => { loadDocuments(); }, [loadDocuments]);
+
+  // 加载 KB 列表
+  useEffect(() => {
+    api.get('/knowledge-bases').then(({ data }) => {
+      setKbs((data || []).map((kb: any) => ({ value: kb.id, label: kb.name })));
+    }).catch(() => {});
+  }, []);
+
+  // KB 变化时加载文件夹树
+  useEffect(() => {
+    if (!selectedKbId) { setFolderTree([]); return; }
+    api.get(`/knowledge-bases/${selectedKbId}/folders`).then(({ data }) => {
+      const toTreeOptions = (nodes: any[]): DataNode[] =>
+        nodes.map((n: any) => ({
+          key: n.id, value: n.id, title: n.name,
+          children: n.children ? toTreeOptions(n.children) : undefined,
+        }));
+      setFolderTree(toTreeOptions(data || []));
+    }).catch(() => setFolderTree([]));
+  }, [selectedKbId]);
 
   // 轮询：有 uploading 状态时每 5 秒刷新
   useEffect(() => {
@@ -208,6 +237,31 @@ export default function DocumentManagePage() {
         <h1 style={{ margin: 0, fontSize: 20 }}>📂 文档管理</h1>
         <Button type="primary" icon={<PlusOutlined />}
           onClick={() => navigate('/documents')}>上传文档</Button>
+      </div>
+
+      {/* KB + 文件夹筛选 */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+        <div style={{ width: 200 }}>
+          <Select
+            style={{ width: '100%' }}
+            placeholder="知识库"
+            allowClear
+            options={kbs}
+            value={selectedKbId}
+            onChange={(val) => { setSelectedKbId(val); setSelectedFolderId(undefined); setPage(1); }}
+          />
+        </div>
+        <div style={{ width: 220 }}>
+          <TreeSelect
+            style={{ width: '100%' }}
+            placeholder="文件夹"
+            treeData={folderTree}
+            value={selectedFolderId}
+            onChange={(val) => { setSelectedFolderId(val); setPage(1); }}
+            allowClear
+            disabled={!selectedKbId}
+          />
+        </div>
       </div>
 
       <SearchBar onSearch={(f) => { setFilters(f); setPage(1); }} />

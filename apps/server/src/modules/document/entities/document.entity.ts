@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
+import { Folder } from '../../knowledge-base/entities/folder.entity';
 
 /** 文档处理状态枚举 */
 export enum DocumentStatus {
@@ -72,6 +73,15 @@ export class Document {
   /** 版本号，每次替换文件自增 */
   @Column({ type: 'int', default: 1 })
   version!: number;
+
+  /** 所属文件夹 folders.id，可为 NULL（兼容旧数据），父文件夹删除时 SET NULL */
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  folder_id!: string | null;
+
+  @ManyToOne(() => Folder, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'folder_id' })
+  folder!: Folder | null;
 
   @CreateDateColumn()
   created_at!: Date;

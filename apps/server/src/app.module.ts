@@ -11,6 +11,7 @@ import { RustFSModule } from './database/rustfs/rustfs.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { DocumentModule } from './modules/document/document.module';
+import { KnowledgeBaseModule } from './modules/knowledge-base/kb.module';
 import { SearchModule } from './modules/search/search.module';
 import { MemoryModule } from './modules/memory/memory.module';
 import { RAGModule } from './modules/rag/rag.module';
@@ -34,7 +35,8 @@ import { PermissionGuard } from './common/guards/permission.guard';
     PostgresModule, MongoDBModule, ElasticsearchModule,
     Neo4jModule, RedisModule, RustFSModule,
     SeedModule,
-    AuthModule, UserModule, DocumentModule, SearchModule, MemoryModule,
+    AuthModule, UserModule, DocumentModule, KnowledgeBaseModule,
+    SearchModule, MemoryModule,
     RAGModule, ChatModule, RbacModule, AnalyticsModule, ObservabilityModule,
   ],
   providers: [

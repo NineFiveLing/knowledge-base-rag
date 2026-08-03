@@ -4,6 +4,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { DataSource } from 'typeorm';
 import { Document } from './entities/document.entity';
 import { DocumentVersion } from './entities/document-version.entity';
+import { Folder } from '../knowledge-base/entities/folder.entity';
 import { DocumentController } from './document.controller';
 import { DocumentService } from './document.service';
 import { PdfParser } from './parsers/pdf.parser';
@@ -25,7 +26,7 @@ import { MongoDBModule } from '../../database/mongodb/mongodb.module';
 /** 文档管理模块：上传、解析、分块、索引全流程 */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Document, DocumentVersion]),
+    TypeOrmModule.forFeature([Document, DocumentVersion, Folder]),
     MongoDBModule,
     BullModule.registerQueue({
       name: 'document-index',

@@ -44,8 +44,9 @@ export class DocumentController {
     @UploadedFile() file: Express.Multer.File,
     @CurrentUser() user: { id: string },
     @Body('dept_id') deptId: string,
+    @Body('folder_id') folderId?: string,
   ) {
-    return this.docService.uploadStage1(file, user.id, deptId);
+    return this.docService.uploadStage1(file, user.id, deptId, folderId);
   }
 
   /** 查询文档列表（带权限过滤，支持分页和条件过滤） */
@@ -73,6 +74,7 @@ export class DocumentController {
       visibility: doc.visibility,
       uploader_id: doc.uploader_id,
       dept_id: doc.dept_id,
+      folder_id: doc.folder_id,
       mongo_doc_id: doc.mongo_doc_id,
       rustfs_file_url: doc.rustfs_file_url,
       created_at: doc.created_at,

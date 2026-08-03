@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, ForbiddenException, NotFoundException,
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Document, DocumentStatus, DocumentVisibility } from './entities/document.entity';
+import { Folder } from '../knowledge-base/entities/folder.entity';
 import { RustFSService } from '../../database/rustfs/rustfs.service';
 import { MongoDBService } from '../../database/mongodb/mongodb.service';
 import { ElasticsearchService } from '../../database/elasticsearch/es.service';
@@ -46,6 +47,7 @@ export class DocumentService {
   constructor(
     @InjectRepository(Document) private docRepo: Repository<Document>,
     @InjectRepository(DocumentVersion) private versionRepo: Repository<DocumentVersion>,
+    @InjectRepository(Folder) private folderRepo: Repository<Folder>,
     private rustfs: RustFSService,
     private mongo: MongoDBService,
     private indexerService: IndexerService,
@@ -67,6 +69,7 @@ export class DocumentService {
     file: Express.Multer.File,
     uploaderId: string,
     deptId: string,
+    folderId?: string,
   ) {
     file.originalname = fixEncoding(file.originalname);
     const uploadedUrls: string[] = [];
@@ -104,6 +107,7 @@ export class DocumentService {
         mongo_doc_id: 'pending', // 先占位，下面会更新
         rustfs_file_url: fileUrl,
         status: DocumentStatus.PARSED,
+        folder_id: folderId || null,
       });
       saved = await this.docRepo.save(doc);
 
@@ -180,6 +184,7 @@ export class DocumentService {
         'doc.visibility',
         'doc.uploader_id',
         'doc.dept_id',
+        'doc.folder_id',
         'doc.created_at',
         'doc.updated_at',
       ])
@@ -200,6 +205,22 @@ export class DocumentService {
     }
     if (keyword) {
       qb.andWhere('doc.name ILIKE :kw', { kw: `%${keyword}%` });
+    }
+
+    // 按 folder_id 或 kb_id 过滤
+    if (dto.folder_id) {
+      qb.andWhere('doc.folder_id = :folderId', { folderId: dto.folder_id });
+    } else if (dto.kb_id) {
+      const folderIds = await this.folderRepo.find({
+        where: { kb_id: dto.kb_id },
+        select: { id: true },
+      });
+      const ids = folderIds.map(f => f.id);
+      if (ids.length) {
+        qb.andWhere('doc.folder_id IN (:...folderIds)', { folderIds: ids });
+      } else {
+        return { items: [], total: 0, page, pageSize };
+      }
     }
 
     qb.orderBy('doc.created_at', 'DESC')
@@ -296,6 +317,17 @@ export class DocumentService {
     if (dto.name !== undefined) doc.name = dto.name;
     if (dto.visibility !== undefined) doc.visibility = dto.visibility;
     if (dto.dept_id !== undefined) doc.dept_id = dto.dept_id;
+
+    // 支持设置文档所属文件夹
+    if (dto.folder_id !== undefined) {
+      if (dto.folder_id === null || (dto.folder_id as any) === '') {
+        doc.folder_id = null;
+      } else {
+        const folder = await this.folderRepo.findOne({ where: { id: dto.folder_id } });
+        if (!folder) throw new BadRequestException('目标文件夹不存在');
+        doc.folder_id = dto.folder_id;
+      }
+    }
 
     return this.docRepo.save(doc);
   }

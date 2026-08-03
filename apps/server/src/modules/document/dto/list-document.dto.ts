@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, Min, Max, IsEnum } from 'class-validator';
+import { IsOptional, IsString, IsInt, Min, Max, IsEnum, IsUUID } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DocumentStatus } from '../entities/document.entity';
 
@@ -28,4 +28,12 @@ export class ListDocumentDto {
   @IsOptional()
   @IsString()
   keyword?: string;
+
+  @IsOptional()
+  @IsUUID()
+  kb_id?: string;
+
+  @IsOptional()
+  @IsUUID()
+  folder_id?: string;
 }

@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { Upload, Card, Progress, Button, Breadcrumb, App } from 'antd';
+import { useState, useEffect } from 'react';
+import { Upload, Card, Progress, Button, Breadcrumb, Select, TreeSelect, App, Row, Col } from 'antd';
 import { InboxOutlined, UploadOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { UploadFile } from 'antd/es/upload/interface';
+import type { DataNode } from 'antd/es/tree';
 import api from '../../services/api';
 import { useAuthStore } from '../../stores/auth.store';
 
@@ -15,6 +16,32 @@ export default function DocumentUploadPage() {
   const { message } = App.useApp();
   const user = useAuthStore((s) => s.user);
 
+  // KB + 文件夹选择
+  const [kbs, setKbs] = useState<{ value: string; label: string }[]>([]);
+  const [selectedKbId, setSelectedKbId] = useState<string | undefined>();
+  const [selectedFolderId, setSelectedFolderId] = useState<string | undefined>();
+  const [folderTree, setFolderTree] = useState<DataNode[]>([]);
+
+  useEffect(() => {
+    api.get('/knowledge-bases').then(({ data }) => {
+      setKbs((data || []).map((kb: any) => ({ value: kb.id, label: kb.name })));
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!selectedKbId) { setFolderTree([]); return; }
+    api.get(`/knowledge-bases/${selectedKbId}/folders`).then(({ data }) => {
+      const toTreeOptions = (nodes: any[]): DataNode[] =>
+        nodes.map((n: any) => ({
+          key: n.id,
+          value: n.id,
+          title: n.name,
+          children: n.children ? toTreeOptions(n.children) : undefined,
+        }));
+      setFolderTree(toTreeOptions(data || []));
+    }).catch(() => setFolderTree([]));
+  }, [selectedKbId]);
+
   const handleUpload = async () => {
     const file = fileList[0]?.originFileObj;
     if (!file) return;
@@ -24,6 +51,7 @@ export default function DocumentUploadPage() {
     const formData = new FormData();
     formData.append('file', file);
     if (user?.dept_id) formData.append('dept_id', user.dept_id);
+    if (selectedFolderId) formData.append('folder_id', selectedFolderId);
 
     try {
       const { data } = await api.post('/documents/upload', formData, {
@@ -52,6 +80,32 @@ export default function DocumentUploadPage() {
       />
       <h2 style={{ marginBottom: 16, fontSize: 20 }}>📄 上传文档</h2>
       <Card>
+        <Row gutter={16} style={{ marginBottom: 16 }}>
+          <Col span={12}>
+            <div style={{ marginBottom: 4, fontWeight: 500 }}>知识库</div>
+            <Select
+              style={{ width: '100%' }}
+              placeholder="选择知识库（可选）"
+              allowClear
+              options={kbs}
+              value={selectedKbId}
+              onChange={(val) => { setSelectedKbId(val); setSelectedFolderId(undefined); }}
+            />
+          </Col>
+          <Col span={12}>
+            <div style={{ marginBottom: 4, fontWeight: 500 }}>文件夹</div>
+            <TreeSelect
+              style={{ width: '100%' }}
+              placeholder={selectedKbId ? '选择文件夹（可选）' : '请先选择知识库'}
+              treeData={folderTree}
+              value={selectedFolderId}
+              onChange={(val) => setSelectedFolderId(val)}
+              allowClear
+              disabled={!selectedKbId}
+            />
+          </Col>
+        </Row>
+
         <Dragger
           fileList={fileList}
           beforeUpload={() => false}

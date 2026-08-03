@@ -4,6 +4,7 @@ import Layout from './components/layout/Layout';
 import LoginPage from './pages/login/LoginPage';
 import ChatPage from './pages/chat/ChatPage';
 import KnowledgeBasePage from './pages/knowledge-base/KnowledgeBasePage';
+import FolderBrowsePage from './pages/knowledge/FolderBrowsePage';
 import DocumentUploadPage from './pages/document/DocumentUploadPage';
 import DocumentManagePage from './pages/document/DocumentManagePage';
 import RoleManagePage from './pages/admin/RoleManagePage';
@@ -27,6 +28,7 @@ export default function App() {
             <Route index element={<Navigate to="/chat" replace />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="knowledge" element={<KnowledgeBasePage />} />
+            <Route path="knowledge/:kbId" element={<FolderBrowsePage />} />
             <Route path="documents" element={<DocumentUploadPage />} />
             <Route path="documents/manage" element={<DocumentManagePage />} />
             <Route path="admin/roles" element={<RoleManagePage />} />

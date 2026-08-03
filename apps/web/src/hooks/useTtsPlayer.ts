@@ -8,6 +8,8 @@ interface MessageAudioState {
   audioCtx: AudioContext;
   nextStartTime: number;
   eventCleanup: () => void;
+  /** audioEnd 后的排空清理定时器 —— 同 ID 重播时由 stopMessage clearTimeout 取消，避免陈旧 timer 误删新播放条目 */
+  drainTimer?: ReturnType<typeof setTimeout>;
 }
 
 export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) {
@@ -26,6 +28,7 @@ export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) 
   const stopMessage = useCallback((messageId: string) => {
     const info = messageAudioMapRef.current.get(messageId);
     if (info) {
+      if (info.drainTimer) clearTimeout(info.drainTimer);
       info.eventCleanup();
       info.audioCtx.close().catch(() => {});
       messageAudioMapRef.current.delete(messageId);
@@ -76,7 +79,7 @@ export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) 
       // 不立即 close —— 等待已调度的音频帧播放完毕后再清理
       updateMessageState(messageId, 'idle');
       const drainMs = Math.max(0, (nextStartTime - audioCtx.currentTime) * 1000 + 300);
-      setTimeout(() => {
+      const drainTimer = setTimeout(() => {
         audioCtx.close().catch(() => {});
         eventCleanup();
         messageAudioMapRef.current.delete(messageId);
@@ -85,6 +88,9 @@ export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) 
           setActiveMessageId(null);
         }
       }, drainMs);
+      // 记录 timer 到 map entry —— 同 ID 重播时 stopMessage 会 clearTimeout 取消此陈旧 timer
+      const entry = messageAudioMapRef.current.get(messageId);
+      if (entry) entry.drainTimer = drainTimer;
     };
 
     const onTtsError = (payload: { messageId: string; message: string }) => {

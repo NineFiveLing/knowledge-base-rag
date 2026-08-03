@@ -33,8 +33,8 @@ export class TencentAsrProvider implements AsrProvider {
       expired: String(expired),
       voice_id: voiceId,
       voice_format: '1',
-      // 默认模型 fun-asr-mtl 映射为 16k_zh（16kHz 中文），其他模型名原样透传为 engine_model_type
-      engine_model_type: this.model === 'fun-asr-mtl' ? '16k_zh' : this.model,
+      // 腾讯云 ASR 使用固定 engine_model_type 枚举，不随 ALIYUN_ASR_MODEL 变化
+      engine_model_type: '16k_zh',       // 16kHz 中文
       needvad: '1',                       // 启用服务端 VAD
       filter_dirty: '0',
       filter_modal: '0',

@@ -18,6 +18,7 @@ export class TencentAsrProvider implements AsrProvider {
     private readonly secretId: string,
     private readonly secretKey: string,
     private readonly appId: string,
+    private readonly model: string,
   ) {}
 
   /** 生成腾讯云 ASR WebSocket 鉴权签名 */
@@ -32,7 +33,8 @@ export class TencentAsrProvider implements AsrProvider {
       expired: String(expired),
       voice_id: voiceId,
       voice_format: '1',
-      engine_model_type: '16k_zh',       // 16kHz 中文
+      // 默认模型 fun-asr-mtl 映射为 16k_zh（16kHz 中文），其他模型名原样透传为 engine_model_type
+      engine_model_type: this.model === 'fun-asr-mtl' ? '16k_zh' : this.model,
       needvad: '1',                       // 启用服务端 VAD
       filter_dirty: '0',
       filter_modal: '0',
@@ -66,8 +68,17 @@ export class TencentAsrProvider implements AsrProvider {
     // 腾讯云实时 ASR 使用二进制帧，不需要启动命令
 
     return new Promise((resolve, reject) => {
+      let settled = false;
+
+      const settle = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        reject(err);
+      };
+
       const timeout = setTimeout(() => {
-        reject(new Error('腾讯云 ASR WebSocket 连接超时（10s）'));
+        settle(new Error('腾讯云 ASR WebSocket 连接超时（10s）'));
       }, 10000);
 
       ws.addEventListener('open', () => {
@@ -124,15 +135,14 @@ export class TencentAsrProvider implements AsrProvider {
         }
       });
 
-      ws.addEventListener('error', (event) => {
-        clearTimeout(timeout);
+      ws.addEventListener('error', () => {
         this.logger.error(`腾讯云 ASR WebSocket 错误: ${sessionId}`);
-        callbacks.onError(new Error('腾讯云 ASR WebSocket 连接错误'));
-        reject(new Error('腾讯云 ASR WebSocket 连接错误'));
+        settle(new Error('腾讯云 ASR WebSocket 连接错误'));
       });
 
       ws.addEventListener('close', (event) => {
         this.logger.log(`腾讯云 ASR WebSocket 关闭: ${sessionId} code=${event.code}`);
+        settle(new Error(`腾讯云 ASR WebSocket 连接关闭 (code=${event.code})`));
       });
     });
   }

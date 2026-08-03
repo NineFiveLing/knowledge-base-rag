@@ -5,8 +5,8 @@ import type { AsrProvider, AsrSession, AsrCallbacks } from './asr-provider.inter
 /**
  * 阿里云百炼（DashScope）实时语音识别 Provider
  *
- * 使用 DashScope Paraformer realtime-v2 模型，通过 WebSocket 双向流式通信。
- * 复用已有的 ALIYUN_API_KEY 凭证。
+ * 使用 DashScope Paraformer 实时识别模型（默认 fun-asr-mtl，可通过 ALIYUN_ASR_MODEL 配置），
+ * 通过 WebSocket 双向流式通信。复用已有的 ALIYUN_API_KEY 凭证。
  *
  * API 文档参考: https://help.aliyun.com/zh/model-studio/real-time-speech-recognition
  */
@@ -14,7 +14,10 @@ export class AliDashScopeAsrProvider implements AsrProvider {
   private readonly logger = new Logger(AliDashScopeAsrProvider.name);
   private readonly endpoint = 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime';
 
-  constructor(private readonly apiKey: string) {}
+  constructor(
+    private readonly apiKey: string,
+    private readonly model: string,
+  ) {}
 
   async start(sessionId: string, callbacks: AsrCallbacks): Promise<AsrSession> {
     // DashScope 实时 ASR 通过 URL query 参数传递 API Key 鉴权
@@ -39,7 +42,7 @@ export class AliDashScopeAsrProvider implements AsrProvider {
           task_group: 'audio',
           task: 'asr',
           function: 'recognition',
-          model: 'paraformer-realtime-v2',
+          model: this.model,
           parameters: {
             format: 'pcm',
             sample_rate: 16000,
@@ -58,8 +61,17 @@ export class AliDashScopeAsrProvider implements AsrProvider {
     };
 
     return new Promise((resolve, reject) => {
+      let settled = false;
+
+      const settle = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        reject(err);
+      };
+
       const timeout = setTimeout(() => {
-        reject(new Error('阿里云 ASR WebSocket 连接超时（10s）'));
+        settle(new Error('阿里云 ASR WebSocket 连接超时（10s）'));
       }, 10000);
 
       ws.addEventListener('open', () => {
@@ -127,15 +139,16 @@ export class AliDashScopeAsrProvider implements AsrProvider {
         }
       });
 
-      ws.addEventListener('error', (event) => {
-        clearTimeout(timeout);
+      ws.addEventListener('error', () => {
         this.logger.error(`DashScope WebSocket 错误: ${sessionId}`);
-        callbacks.onError(new Error('阿里云 ASR WebSocket 连接错误'));
-        reject(new Error('阿里云 ASR WebSocket 连接错误'));
+        // 不在此处调用 callbacks.onError — AsrService 的 catch 块负责统一通知
+        settle(new Error('阿里云 ASR WebSocket 连接错误'));
       });
 
       ws.addEventListener('close', (event) => {
         this.logger.log(`DashScope WebSocket 关闭: ${sessionId} code=${event.code}`);
+        // 连接在 open 之前关闭（如 1006 异常关闭），需主动 reject
+        settle(new Error(`阿里云 ASR WebSocket 连接关闭 (code=${event.code})`));
       });
     });
   }

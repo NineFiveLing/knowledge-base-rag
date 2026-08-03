@@ -11,7 +11,8 @@ export function createAsrProvider(config: ConfigService): AsrProvider {
     case 'aliyun': {
       const apiKey = config.get('ALIYUN_API_KEY') || '';
       if (!apiKey) throw new Error('ALIYUN_API_KEY 未配置，阿里云 ASR 不可用');
-      return new AliDashScopeAsrProvider(apiKey);
+      const model = config.get('ALIYUN_ASR_MODEL', 'fun-asr-mtl');
+      return new AliDashScopeAsrProvider(apiKey, model);
     }
     case 'tencent': {
       const secretId = config.get('TENCENT_SECRET_ID') || '';
@@ -19,7 +20,9 @@ export function createAsrProvider(config: ConfigService): AsrProvider {
       const appId = config.get('TENCENT_APP_ID') || '';
       if (!secretId || !secretKey) throw new Error('TENCENT_SECRET_ID/SECRET_KEY 未配置，腾讯云 ASR 不可用');
       if (!appId) throw new Error('TENCENT_APP_ID 未配置，腾讯云 ASR 需要 AppID');
-      return new TencentAsrProvider(secretId, secretKey, appId);
+      // 腾讯云也读 ALIYUN_ASR_MODEL 作为模型标识
+      const model = config.get('ALIYUN_ASR_MODEL', 'fun-asr-mtl');
+      return new TencentAsrProvider(secretId, secretKey, appId, model);
     }
     default:
       throw new Error(`未知 ASR 提供商: ${provider}，可选值: aliyun | tencent`);

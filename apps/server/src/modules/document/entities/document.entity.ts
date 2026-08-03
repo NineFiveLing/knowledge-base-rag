@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
 import { Folder } from '../../knowledge-base/entities/folder.entity';
+import { KnowledgeBase } from '../../knowledge-base/entities/knowledge-base.entity';
 
 /** 文档处理状态枚举 */
 export enum DocumentStatus {
@@ -82,6 +83,15 @@ export class Document {
   @ManyToOne(() => Folder, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'folder_id' })
   folder!: Folder | null;
+
+  /** 所属知识库（可直接关联，也可通过文件夹间接关联） */
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  kb_id!: string | null;
+
+  @ManyToOne(() => KnowledgeBase, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'kb_id' })
+  knowledgeBase!: KnowledgeBase | null;
 
   @CreateDateColumn()
   created_at!: Date;

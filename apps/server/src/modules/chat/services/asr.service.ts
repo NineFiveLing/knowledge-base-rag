@@ -33,7 +33,8 @@ export class AsrService {
       this.logger.log(`ASR 会话开始: ${sessionId}`);
     } catch (err) {
       this.logger.error(`ASR 会话启动失败: ${sessionId} — ${(err as Error).message}`);
-      callbacks.onError(err as Error);
+      // 不在此处调 callbacks.onError — 调用方的 catch 块负责通知客户端
+      // onError 仅用于会话建立后的运行时错误（如 task-failed）
       throw err;
     }
   }

@@ -12,7 +12,7 @@ export class ImageParser implements DocumentParser {
 
   constructor(config: ConfigService) {
     this.llm = new ChatOpenAI({
-      model: config.get('ALIYUN_OCR_MODEL'),
+      model: config.get('ALIYUN_OCR_MODEL', 'qwen-vl-ocr'),
       apiKey: config.get('ALIYUN_API_KEY'),
       configuration: { baseURL: config.get('ALIYUN_BASE_URL') },
     });

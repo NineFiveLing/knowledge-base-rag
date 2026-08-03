@@ -18,7 +18,7 @@ importers:
         specifier: ^3.1097.0
         version: 3.1097.0
       '@elastic/elasticsearch':
-        specifier: ^8.11.0
+        specifier: 8.11.0
         version: 8.11.0
       '@langchain/core':
         specifier: ^1.2.3
@@ -83,6 +83,9 @@ importers:
       class-validator:
         specifier: ^0.15.1
         version: 0.15.1
+      form-data:
+        specifier: ^4.0.6
+        version: 4.0.6
       ioredis:
         specifier: ^5.11.1
         version: 5.11.1

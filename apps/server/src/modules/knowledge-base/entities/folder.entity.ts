@@ -6,7 +6,6 @@ import { KnowledgeBase } from './knowledge-base.entity';
 
 /** 文件夹实体 —— 支持多级嵌套（parent_id 自引用） */
 @Entity('folders')
-@Index(['kb_id'])
 @Unique(['kb_id', 'parent_id', 'name'])
 export class Folder {
   @PrimaryGeneratedColumn('uuid')

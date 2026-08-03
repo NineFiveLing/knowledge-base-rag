@@ -31,10 +31,11 @@ export class KnowledgeBaseService {
     const results: any[] = [];
     for (const kb of kbs) {
       const folderIds = await this.getFolderIdsByKb(kb.id);
-      const docCount = await this.docRepo
-        .createQueryBuilder('doc')
-        .where('doc.folder_id IN (:...ids)', { ids: folderIds.length ? folderIds : ['__none__'] })
-        .getCount();
+      const docCount = folderIds.length
+        ? await this.docRepo.createQueryBuilder('doc')
+            .where('doc.folder_id IN (:...ids)', { ids: folderIds })
+            .getCount()
+        : 0;
       results.push({
         id: kb.id,
         name: kb.name,

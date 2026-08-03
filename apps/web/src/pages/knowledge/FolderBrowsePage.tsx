@@ -4,10 +4,12 @@ import { Breadcrumb, Button, Tree, Table, Tag, Dropdown, App, Spin, Empty } from
 import {
   FolderAddOutlined, EditOutlined, DeleteOutlined,
   EyeOutlined, DownloadOutlined, ArrowLeftOutlined,
+  EllipsisOutlined,
 } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import api from '../../services/api';
 import FolderModal from '../../components/knowledge/FolderModal';
+import MoveFolderModal from '../../components/knowledge/MoveFolderModal';
 import KnowledgeBaseModal from '../../components/knowledge/KnowledgeBaseModal';
 import DocumentDetailDrawer from '../../components/document/DocumentDetailDrawer';
 
@@ -47,6 +49,7 @@ export default function FolderBrowsePage() {
 
   const [kb, setKb] = useState<any>(null);
   const [folderTree, setFolderTree] = useState<DataNode[]>([]);
+  const [flatFolders, setFlatFolders] = useState<{ id: string; name: string; parent_id: string | null }[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [treeLoading, setTreeLoading] = useState(true);
 
@@ -59,6 +62,7 @@ export default function FolderBrowsePage() {
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [editingFolder, setEditingFolder] = useState<any>(null);
   const [newFolderParentId, setNewFolderParentId] = useState<string | undefined>();
+  const [moveFolderTarget, setMoveFolderTarget] = useState<{ id: string; name: string; parent_id: string | null } | null>(null);
   const [kbModalOpen, setKbModalOpen] = useState(false);
   const [detailDocId, setDetailDocId] = useState<string | null>(null);
 
@@ -75,6 +79,17 @@ export default function FolderBrowsePage() {
     setTreeLoading(true);
     try {
       const { data } = await api.get(`/knowledge-bases/${kbId}/folders`);
+      // 从嵌套树中提取扁平列表（供 MoveFolderModal 使用）
+      const flatten = (nodes: any[]): any[] => {
+        const result: any[] = [];
+        for (const n of nodes) {
+          result.push({ id: n.id, name: n.name, parent_id: n.parent_id ?? null });
+          if (n.children) result.push(...flatten(n.children));
+        }
+        return result;
+      };
+      setFlatFolders(flatten(data || []));
+      // 原有逻辑不变
       const toTreeNodes = (nodes: any[]): DataNode[] =>
         nodes.map((n: any) => ({
           key: n.id,
@@ -120,6 +135,10 @@ export default function FolderBrowsePage() {
       if (selectedFolderId === id) setSelectedFolderId(null);
       loadFolderTree();
     } catch (err: any) { message.error(err.response?.data?.message || '删除失败'); }
+  };
+
+  const handleMoveFolder = (folder: any) => {
+    setMoveFolderTarget(folder);
   };
 
   const handleTreeSelect = (selectedKeys: React.Key[]) => {
@@ -228,33 +247,41 @@ export default function FolderBrowsePage() {
               titleRender={(node: any) => {
                 const folder = node.data;
                 return (
-                  <Dropdown menu={{
-                    items: [
-                      {
-                        key: 'new', icon: <FolderAddOutlined />, label: '新建子文件夹',
-                        onClick: () => {
-                          setEditingFolder(null);
-                          setNewFolderParentId(folder.id);
-                          setFolderModalOpen(true);
-                        },
-                      },
-                      {
-                        key: 'rename', icon: <EditOutlined />, label: '重命名',
-                        onClick: () => {
-                          setEditingFolder(folder);
-                          setNewFolderParentId(undefined);
-                          setFolderModalOpen(true);
-                        },
-                      },
-                      { type: 'divider' },
-                      {
-                        key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true,
-                        onClick: () => handleDeleteFolder(folder.id),
-                      },
-                    ],
-                  }} trigger={['contextMenu']}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                     <span>📁 {folder.name}</span>
-                  </Dropdown>
+                    <Dropdown menu={{
+                      items: [
+                        {
+                          key: 'new', icon: <FolderAddOutlined />, label: '新建子文件夹',
+                          onClick: () => {
+                            setEditingFolder(null);
+                            setNewFolderParentId(folder.id);
+                            setFolderModalOpen(true);
+                          },
+                        },
+                        {
+                          key: 'rename', icon: <EditOutlined />, label: '重命名',
+                          onClick: () => {
+                            setEditingFolder(folder);
+                            setNewFolderParentId(undefined);
+                            setFolderModalOpen(true);
+                          },
+                        },
+                        {
+                          key: 'move', icon: <FolderAddOutlined />, label: '移动到…',
+                          onClick: () => handleMoveFolder(folder),
+                        },
+                        { type: 'divider' },
+                        {
+                          key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true,
+                          onClick: () => handleDeleteFolder(folder.id),
+                        },
+                      ],
+                    }} trigger={['click']}>
+                      <Button type="text" size="small" icon={<EllipsisOutlined />}
+                        onClick={(e) => e.stopPropagation()} />
+                    </Dropdown>
+                  </div>
                 );
               }}
             />
@@ -293,6 +320,13 @@ export default function FolderBrowsePage() {
         kbId={kbId!}
         parentId={newFolderParentId}
         onClose={() => { setFolderModalOpen(false); setEditingFolder(null); }}
+        onSuccess={loadFolderTree}
+      />
+      <MoveFolderModal
+        open={!!moveFolderTarget}
+        folder={moveFolderTarget}
+        allFolders={flatFolders}
+        onClose={() => setMoveFolderTarget(null)}
         onSuccess={loadFolderTree}
       />
       <KnowledgeBaseModal

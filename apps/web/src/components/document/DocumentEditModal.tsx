@@ -81,8 +81,8 @@ export default function DocumentEditModal({ open, document, onClose, onSuccess }
         name: values.name,
         visibility: values.visibility,
         dept_id: values.dept_id || undefined,
-        folder_id: values.folder_id || undefined,
-        kb_id: values.kb_id || undefined,
+        folder_id: values.folder_id ?? null,
+        kb_id: values.kb_id ?? null,
       });
       message.success('修改成功');
       onSuccess();
@@ -132,7 +132,7 @@ export default function DocumentEditModal({ open, document, onClose, onSuccess }
             placeholder="选择知识库（可选）"
             allowClear
             options={kbs}
-            onChange={(val) => setSelectedKbId(val)}
+            onChange={(val) => { setSelectedKbId(val); form.setFieldValue('folder_id', undefined); }}
           />
         </Form.Item>
         <Form.Item name="folder_id" label="所属文件夹">

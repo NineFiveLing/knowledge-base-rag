@@ -4,10 +4,12 @@ import { Repository } from 'typeorm';
 import { RAGService } from '../rag/rag.service';
 import { MemoryService } from '../memory/memory.service';
 import { LangfuseService } from '../../common/observability/langfuse.service';
+import { TtsService } from './services/tts.service';
+import { VoiceGateway } from './voice.gateway';
 import { Conversation } from './entities/conversation.entity';
 import { Message } from './entities/message.entity';
 
-/** 聊天服务：SSE 流式 + 记忆管理 + "记住xxx"处理 + 对话 CRUD */
+/** 聊天服务：SSE 流式 + 记忆管理 + "记住xxx"处理 + 对话 CRUD + TTS 并行流式 */
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
@@ -16,6 +18,8 @@ export class ChatService {
     private rag: RAGService,
     public memory: MemoryService,
     private langfuse: LangfuseService,
+    private tts: TtsService,
+    private voiceGateway: VoiceGateway,
     @InjectRepository(Conversation) private convRepo: Repository<Conversation>,
     @InjectRepository(Message) private msgRepo: Repository<Message>,
   ) {}
@@ -52,6 +56,14 @@ export class ChatService {
 
     // 先发送对话 ID 事件，前端据此绑定消息归属
     yield { type: 'conversation', conversationId: resolvedConvId, isNew: isNewConv };
+
+    // ── TTS 并行流式输出状态 ──
+    let ttsStarted = false;
+    let ttsActive = false;
+    let ttsPaused = false;
+    let textBuffer = '';
+    const TTS_DELAY_CHARS = 5;
+    const voiceSocket = this.voiceGateway.getVoiceSocket(sessionId);
 
     // 流式 RAG 回答
     const traceId = this.langfuse.createTrace('chat', { query: message }, userId, sessionId);
@@ -129,6 +141,20 @@ export class ChatService {
         // 非最终答案节点 → 丢弃 token
         if (!currentNode || !ANSWER_NODES.has(currentNode)) continue;
 
+        // TTS 延迟启动 + 流式 feed（仅最终答案节点的文本 token）
+        if (voiceSocket && typeof token === 'string') {
+          if (!ttsStarted) {
+            textBuffer += token;
+            if (textBuffer.length >= TTS_DELAY_CHARS) {
+              ttsStarted = true;
+              ttsActive = true;
+              this.startTtsStream(sessionId, textBuffer, voiceSocket);
+            }
+          } else if (ttsActive && !ttsPaused) {
+            this.tts.feedText(sessionId, token);
+          }
+        }
+
         if (sourcesData) {
           fullAnswer += token;
           yield { type: 'text', content: token };
@@ -181,6 +207,11 @@ export class ChatService {
           }
         }
       }
+    }
+
+    // 流结束后 end TTS
+    if (ttsActive) {
+      this.tts.endSession(sessionId);
     }
 
     // 流结束后 flush 残留缓冲区
@@ -254,6 +285,33 @@ export class ChatService {
     if (!conv) throw new Error('对话不存在');
     conv.title = title;
     return this.convRepo.save(conv);
+  }
+
+  /** 启动 TTS 流式合成（异步，不阻塞 SSE） */
+  private async startTtsStream(sessionId: string, initialText: string, socket: any) {
+    try {
+      await this.tts.startSession(sessionId, {
+        onAudioChunk: (buffer: Buffer) => {
+          if (socket.connected) {
+            socket.emit('audioChunk', buffer);
+          }
+        },
+        onEnd: () => {
+          if (socket.connected) {
+            socket.emit('audioEnd');
+          }
+        },
+        onError: (err: Error) => {
+          this.logger.warn(`TTS 错误 [${sessionId}]: ${err.message}`);
+          if (socket.connected) {
+            socket.emit('ttsError', { message: err.message });
+          }
+        },
+      });
+      this.tts.feedText(sessionId, initialText);
+    } catch (err) {
+      this.logger.warn(`TTS 启动失败 [${sessionId}]: ${(err as Error).message}`);
+    }
   }
 
   /** 持久化一条消息 */

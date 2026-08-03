@@ -51,6 +51,7 @@ export default function DocumentUploadPage() {
     const formData = new FormData();
     formData.append('file', file);
     if (user?.dept_id) formData.append('dept_id', user.dept_id);
+    if (selectedKbId) formData.append('kb_id', selectedKbId);
     if (selectedFolderId) formData.append('folder_id', selectedFolderId);
 
     try {
@@ -85,8 +86,7 @@ export default function DocumentUploadPage() {
             <div style={{ marginBottom: 4, fontWeight: 500 }}>知识库</div>
             <Select
               style={{ width: '100%' }}
-              placeholder="选择知识库（可选）"
-              allowClear
+              placeholder="选择知识库"
               options={kbs}
               value={selectedKbId}
               onChange={(val) => { setSelectedKbId(val); setSelectedFolderId(undefined); }}

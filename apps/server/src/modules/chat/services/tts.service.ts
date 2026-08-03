@@ -52,11 +52,15 @@ export class TtsService {
     this.logger.log(`TTS 会话结束: ${sessionId}`);
   }
 
-  /** 取消合成（暂停用，不触发 onEnd） */
+  /** 取消合成（暂停用，不触发 onEnd）；内部 catch，永不抛异常 */
   cancelSession(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
-    session.cancel();
+    try {
+      session.cancel();
+    } catch {
+      this.logger.warn(`TTS 会话取消出错，已忽略: ${sessionId}`);
+    }
     this.sessions.delete(sessionId);
     this.logger.log(`TTS 会话取消: ${sessionId}`);
   }

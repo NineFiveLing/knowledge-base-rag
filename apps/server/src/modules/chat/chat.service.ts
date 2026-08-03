@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { RAGService } from '../rag/rag.service';
 import { MemoryService } from '../memory/memory.service';
 import { LangfuseService } from '../../common/observability/langfuse.service';
@@ -64,6 +65,8 @@ export class ChatService {
     let ttsPaused = false;
     let textBuffer = '';
     const TTS_DELAY_CHARS = 5;
+    // 流式 TTS 对应的消息 ID（audioChunk/audioEnd/ttsError 事件据此绑定到前端消息）
+    const streamMessageId = `stream-${Date.now()}-${randomUUID().slice(0, 8)}`;
     const voiceSocket = this.voiceGateway.getVoiceSocket(sessionId);
     if (!voiceSocket) {
       this.logger.warn(`🔇 TTS 跳过：没有 voice socket 连接 (sessionId=${sessionId})，请确认前端已连接 /voice namespace`);
@@ -158,7 +161,7 @@ export class ChatService {
             if (textBuffer.length >= TTS_DELAY_CHARS) {
               ttsStarted = true;
               ttsConnecting = true;
-              this.startTtsStream(sessionId, textBuffer).then(() => {
+              this.startTtsStream(sessionId, textBuffer, streamMessageId).then(() => {
                 ttsConnecting = false;
                 ttsReady = true;
                 // flush 连接期间缓冲的 tokens
@@ -319,29 +322,30 @@ export class ChatService {
 
   /** 启动 TTS 流式合成（异步，不阻塞 SSE）
    *  每次回调时实时从 voiceGateway 查找 socket，避免持有旧 socket 引用
-   *  （voice socket 可能在 TTS 期间因网络波动断开重连） */
-  private async startTtsStream(sessionId: string, initialText: string) {
+   *  （voice socket 可能在 TTS 期间因网络波动断开重连）
+   *  所有事件 payload 携带 messageId，前端据此将音频绑定到对应消息 */
+  private async startTtsStream(sessionId: string, initialText: string, messageId: string) {
     try {
-      this.logger.log(`🔊 TTS 开始连接: session=${sessionId}`);
+      this.logger.log(`🔊 TTS 开始连接: session=${sessionId} msgId=${messageId}`);
       await this.tts.startSession(sessionId, {
         onAudioChunk: (buffer: Buffer) => {
           const socket = this.voiceGateway.getVoiceSocket(sessionId);
           if (socket?.connected) {
-            socket.emit('audioChunk', buffer);
+            socket.emit('audioChunk', { messageId, buffer });
           }
         },
         onEnd: () => {
           this.logger.log(`🔊 TTS 合成完成: session=${sessionId}`);
           const socket = this.voiceGateway.getVoiceSocket(sessionId);
           if (socket?.connected) {
-            socket.emit('audioEnd');
+            socket.emit('audioEnd', { messageId });
           }
         },
         onError: (err: Error) => {
           this.logger.error(`TTS 错误 [${sessionId}]: ${err.message}`);
           const socket = this.voiceGateway.getVoiceSocket(sessionId);
           if (socket?.connected) {
-            socket.emit('ttsError', { message: err.message });
+            socket.emit('ttsError', { messageId, message: err.message });
           }
         },
       });
@@ -349,6 +353,47 @@ export class ChatService {
       this.tts.feedText(sessionId, initialText);
     } catch (err) {
       this.logger.error(`TTS 启动失败 [${sessionId}]: ${(err as Error).message}`);
+    }
+  }
+
+  /** 单条消息 TTS 合成回放（非流式）
+   *  取消同 session 旧 TTS → 校验语音连接 → 合成完整文本并 emit audioChunk/audioEnd/ttsError */
+  async ttsSynthesize(text: string, messageId: string, sessionId: string): Promise<void> {
+    // 取消同 session 的旧 TTS
+    this.tts.cancelSession(sessionId);
+
+    const voiceSocket = this.voiceGateway.getVoiceSocket(sessionId);
+    if (!voiceSocket?.connected) {
+      throw new Error('语音连接不可用');
+    }
+
+    try {
+      await this.tts.startSession(sessionId, {
+        onAudioChunk: (buffer: Buffer) => {
+          if (voiceSocket.connected) {
+            voiceSocket.emit('audioChunk', { messageId, buffer });
+          }
+        },
+        onEnd: () => {
+          if (voiceSocket.connected) {
+            voiceSocket.emit('audioEnd', { messageId });
+          }
+        },
+        onError: (err: Error) => {
+          if (voiceSocket.connected) {
+            voiceSocket.emit('ttsError', { messageId, message: err.message });
+          }
+        },
+      });
+      this.tts.feedText(sessionId, text);
+      this.tts.endSession(sessionId);
+    } catch (err) {
+      if (voiceSocket.connected) {
+        voiceSocket.emit('ttsError', {
+          messageId,
+          message: `TTS 合成失败: ${(err as Error).message}`,
+        });
+      }
     }
   }
 

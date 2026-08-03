@@ -37,6 +37,17 @@ export class ChatController {
     res.end();
   }
 
+  /** 单条消息 TTS 合成回放端点（按需播放某条消息的语音） */
+  @Post('tts')
+  @UseGuards(JwtAuthGuard)
+  async synthesizeTts(
+    @Body() dto: { text: string; messageId: string; sessionId: string },
+    @CurrentUser() user: { id: string },
+  ) {
+    await this.chatService.ttsSynthesize(dto.text, dto.messageId, dto.sessionId);
+    return { success: true };
+  }
+
   /** 会话结束端点 */
   @Post('session/end')
   @UseGuards(JwtAuthGuard)

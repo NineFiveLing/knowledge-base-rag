@@ -3,7 +3,9 @@ import { Input, Button, message as antMsg } from 'antd';
 import { SendOutlined, UserOutlined, RobotOutlined } from '@ant-design/icons';
 import { useSSE } from '../../hooks/useSSE';
 import { useVoiceChat } from '../../hooks/useVoiceChat';
-import { useTtsPlayer } from '../../hooks/useTtsPlayer';
+import { useTtsPlayer, type MessagePlayState } from '../../hooks/useTtsPlayer';
+import MessageTtsButton from '../../components/chat/MessageTtsButton';
+import TtsGlobalControl from '../../components/chat/TtsGlobalControl';
 import VoiceButton from '../../components/chat/VoiceButton';
 import ConversationList from '../../components/chat/ConversationList';
 import { SourceCard } from '../../components/chat/SourceCard';
@@ -35,7 +37,11 @@ export default function ChatPage() {
   // 使用 chatStore.sessionId 确保跨路由切换不变化 —— voice socket 和 SSE 必须共用一个 sessionId
   const sessionId = chatStore.sessionId;
   const { socket: voiceSocket, isRecording, asrText, triggerMessage, connect, startRecording, stopRecording, clearTrigger } = useVoiceChat(sessionId);
-  const { stopAll } = useTtsPlayer(voiceSocket, () => sessionId);
+  const { messageStates, activeMessageId, autoPlayEnabled, playMessage, pauseMessage, resumeMessage, stopAll, toggleAutoPlay } = useTtsPlayer(voiceSocket, () => sessionId);
+  const autoPlayRef = useRef(autoPlayEnabled);
+  autoPlayRef.current = autoPlayEnabled;
+  const stopAllRef = useRef(stopAll);
+  stopAllRef.current = stopAll;
 
   // ── 跨对话状态管理 ──
   const activeConvRef = useRef<string | null>(null);
@@ -230,6 +236,11 @@ export default function ChatPage() {
             });
           }
           chatDispatch.setStreaming('');
+          // 自动播放新消息（需通过 ref 读取最新 autoPlayEnabled，因为 handleSend 依赖不包含它）
+          if (autoPlayRef.current && finalText) {
+            const msgId = `${key}-assistant-${Date.now()}`;
+            setTimeout(() => playMessage(msgId, finalText), 100);
+          }
         }
         // 流结束后刷新列表
         setTimeout(() => {
@@ -286,6 +297,9 @@ export default function ChatPage() {
   const handleSelectConv = useCallback(async (convId: string) => {
     // 点击当前对话 — 无需切换
     if (convId === activeConvRef.current) return;
+
+    // 停止旧对话的所有 TTS 音频播放
+    stopAllRef.current();
 
     // 清空输入框（防止切换会话时输入文字残留到新会话）
     setInput('');
@@ -385,6 +399,8 @@ export default function ChatPage() {
         <div className="chat-messages">
           {loadingHistory && <div className="chat-loading-hint">加载中…</div>}
 
+          <TtsGlobalControl autoPlayEnabled={autoPlayEnabled} onToggle={toggleAutoPlay} />
+
           {messages.map((m, i) => (
             <div key={i} className={`chat-bubble-row ${m.role}`}>
               <div className={`chat-avatar ${m.role}`}>
@@ -392,6 +408,18 @@ export default function ChatPage() {
               </div>
               <div className="chat-bubble-wrapper">
                 <div className={`chat-bubble ${m.role}`}>{m.content}</div>
+                {m.role === 'assistant' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                    <MessageTtsButton
+                      messageId={`${activeConvId}-msg-${i}`}
+                      text={m.content}
+                      state={messageStates[`${activeConvId}-msg-${i}`] || 'idle'}
+                      onPlay={playMessage}
+                      onPause={pauseMessage}
+                      onResume={resumeMessage}
+                    />
+                  </div>
+                )}
                 {m.role === 'assistant' && m.sources && m.sources.length > 0 && (
                   <div className="chat-sources">
                     <div className="chat-sources-header">
@@ -424,6 +452,16 @@ export default function ChatPage() {
               <div className="chat-avatar assistant"><RobotOutlined /></div>
               <div className="chat-bubble-wrapper">
                 <div className="chat-bubble assistant streaming">{displayStreaming}</div>
+                <div className="chat-message-tts">
+                  <MessageTtsButton
+                    messageId={`${activeConvId}-streaming`}
+                    text={displayStreaming}
+                    state={messageStates[`${activeConvId}-streaming`] || 'idle'}
+                    onPlay={playMessage}
+                    onPause={pauseMessage}
+                    onResume={resumeMessage}
+                  />
+                </div>
                 {displaySources.length > 0 && (
                   <div className="chat-sources">
                     <div className="chat-sources-header">

@@ -79,12 +79,13 @@ export default function FolderBrowsePage() {
     setTreeLoading(true);
     try {
       const { data } = await api.get(`/knowledge-bases/${kbId}/folders`);
-      // 从嵌套树中提取扁平列表（供 MoveFolderModal 使用）
-      const flatten = (nodes: any[]): any[] => {
+      // 从嵌套树中提取扁平列表（供 MoveFolderModal 使用）。
+      // 后端嵌套数据不含 parent_id，通过递归参数推导父级 id。
+      const flatten = (nodes: any[], parentId: string | null = null): any[] => {
         const result: any[] = [];
         for (const n of nodes) {
-          result.push({ id: n.id, name: n.name, parent_id: n.parent_id ?? null });
-          if (n.children) result.push(...flatten(n.children));
+          result.push({ id: n.id, name: n.name, parent_id: parentId });
+          if (n.children) result.push(...flatten(n.children, n.id));
         }
         return result;
       };

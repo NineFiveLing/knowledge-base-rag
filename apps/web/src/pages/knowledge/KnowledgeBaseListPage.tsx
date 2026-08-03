@@ -55,6 +55,7 @@ export default function KnowledgeBaseListPage() {
             <Col key={kb.id} xs={24} sm={12} md={8} lg={6}>
               <Card
                 hoverable
+                title={`📗 ${kb.name}`}
                 onClick={() => navigate(`/knowledge/${kb.id}`)}
                 extra={
                   <Dropdown menu={{
@@ -83,7 +84,6 @@ export default function KnowledgeBaseListPage() {
                 }
               >
                 <Card.Meta
-                  title={`📗 ${kb.name}`}
                   description={
                     <>
                       <div>{kb.description || '暂无描述'}</div>

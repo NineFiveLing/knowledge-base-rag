@@ -25,7 +25,7 @@ export class ChatService {
     @InjectRepository(Message) private msgRepo: Repository<Message>,
   ) {}
 
-  async *streamAnswer(message: string, userId: string, sessionId: string, conversationId?: string) {
+  async *streamAnswer(message: string, userId: string, sessionId: string, conversationId?: string, streamMessageId?: string) {
     // 检测"记住xxx"模式 → 写入 Mem0 明确记忆
     if (/^(记住|请记住|帮我记住)/.test(message)) {
       const fact = message.replace(/^(记住|请记住|帮我记住)[，,：:\s]*/, '');
@@ -66,7 +66,7 @@ export class ChatService {
     let textBuffer = '';
     const TTS_DELAY_CHARS = 5;
     // 流式 TTS 对应的消息 ID（audioChunk/audioEnd/ttsError 事件据此绑定到前端消息）
-    const streamMessageId = `stream-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const actualStreamMsgId = streamMessageId || `stream-${Date.now()}-${randomUUID().slice(0, 8)}`;
     const voiceSocket = this.voiceGateway.getVoiceSocket(sessionId);
     if (!voiceSocket) {
       this.logger.warn(`🔇 TTS 跳过：没有 voice socket 连接 (sessionId=${sessionId})，请确认前端已连接 /voice namespace`);
@@ -161,7 +161,7 @@ export class ChatService {
             if (textBuffer.length >= TTS_DELAY_CHARS) {
               ttsStarted = true;
               ttsConnecting = true;
-              this.startTtsStream(sessionId, textBuffer, streamMessageId).then(() => {
+              this.startTtsStream(sessionId, textBuffer, actualStreamMsgId).then(() => {
                 ttsConnecting = false;
                 ttsReady = true;
                 // flush 连接期间缓冲的 tokens

@@ -44,6 +44,17 @@ class ChatStore {
   /** 当前 SSE 流所属的会话 ID（用于 SSE 回调的前后台路由判断） */
   currentSSESessionConvId: string | null = null;
 
+  /** 每对话的流式 TTS messageId 映射（用于前后台切换时匹配音频） */
+  streamMessageIdMap = new Map<string, string>();
+
+  setStreamMessageId(convId: string, messageId: string) {
+    this.streamMessageIdMap.set(convId, messageId);
+  }
+
+  getStreamMessageId(convId: string): string | undefined {
+    return this.streamMessageIdMap.get(convId);
+  }
+
   /** 应用层会话 ID —— 仅生成一次，跨路由切换保持不变。
    *  TTS voice socket 注册和 SSE 流必须使用同一个 sessionId，否则后端 getVoiceSocket 找不到。 */
   readonly sessionId: string = `sess-${Date.now()}`;

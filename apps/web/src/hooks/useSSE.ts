@@ -33,6 +33,7 @@ export function useSSE() {
       conversationId?: string | null,
       onConversation?: (conversationId: string, isNew: boolean) => void,
       onPromptContext?: (ctx: { hasSummary: boolean; summaryLength: number; hasSystemContext: boolean; systemContextLength: number; hasHistory: boolean; historyLength: number; retrievedChunks: number; systemPrompt: string }) => void,
+      streamMessageId?: string,
     ) => {
       const controller = new AbortController();
       const convKey = conversationId || '__new__';
@@ -41,6 +42,7 @@ export function useSSE() {
       const token = localStorage.getItem('access_token');
       const body: any = { message, sessionId };
       if (conversationId) body.conversationId = conversationId;
+      if (streamMessageId) body.streamMessageId = streamMessageId;
 
       try {
         const response = await fetch('/api/chat/stream', {

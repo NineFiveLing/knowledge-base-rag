@@ -28,7 +28,7 @@ export class ChatController {
     res.setHeader('Connection', 'keep-alive');
 
     const sessionId = dto.sessionId || `sess-${Date.now()}`;
-    const stream = this.chatService.streamAnswer(dto.message, user.id, sessionId, dto.conversationId);
+    const stream = this.chatService.streamAnswer(dto.message, user.id, sessionId, dto.conversationId, dto.streamMessageId);
 
     for await (const chunk of stream) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);

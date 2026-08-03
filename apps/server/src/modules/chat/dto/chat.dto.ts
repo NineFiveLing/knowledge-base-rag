@@ -12,4 +12,8 @@ export class ChatDto {
   @IsOptional()
   @IsString()
   conversationId?: string;
+
+  @IsOptional()
+  @IsString()
+  streamMessageId?: string;
 }

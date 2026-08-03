@@ -188,6 +188,10 @@ export default function ChatPage() {
       window.dispatchEvent(new CustomEvent('refresh-conversations'));
     }, 100);
 
+    // 生成流式 TTS messageId，前端用于匹配 audioChunk/audioEnd 事件
+    const streamMsgId = `stream-${Date.now()}`;
+    chatStore.setStreamMessageId(sseConvId || '__new__', streamMsgId);
+
     await sendMessage(
       text,
       sessionId,
@@ -272,6 +276,11 @@ export default function ChatPage() {
           activeConvRef.current = newConvId;
           chatStore.setActiveConv(newConvId);
           chatStore.currentSSESessionConvId = newConvId;
+          // 将 streamMessageId 从临时 key 迁移到真实 convId
+          const sid = chatStore.getStreamMessageId('__new__');
+          if (sid) {
+            chatStore.setStreamMessageId(newConvId, sid);
+          }
           setActiveConvId(newConvId);
           setTimeout(() => {
             window.dispatchEvent(new CustomEvent('refresh-conversations'));
@@ -282,6 +291,7 @@ export default function ChatPage() {
       (ctx) => {
         promptContextRef.current = ctx;
       },
+      streamMsgId,
     );
   }, [sendMessage, sessionId]);
 

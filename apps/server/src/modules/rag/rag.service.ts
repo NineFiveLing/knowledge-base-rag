@@ -88,7 +88,7 @@ export class RAGService implements OnModuleInit {
     );
 
     this.graph = createRAGGraph(
-      createIntentClassifier(this.llm, this.langfuse),
+      createIntentClassifier(this.llm, this.memory, this.langfuse),
       this.directAnswer.bind(this),
       this.simpleRetrieval.bind(this),
       createAgentNode(
@@ -131,16 +131,16 @@ export class RAGService implements OnModuleInit {
   }
 
   private async directAnswer(state: any) {
-    this.logger.debug(`📌 [direct_answer] 进入 | 直接LLM回答（闲聊/记忆指令）`);
+    this.logger.log(`📌 [direct_answer] 进入 | 直接LLM回答（闲聊/记忆指令）`);
     const res = await withLLMRetry(() => this.llm.invoke(state.messages));
-    this.logger.debug(`📌 [direct_answer] 完成 | answer="${String(res.content).slice(0, 100)}"`);
+    this.logger.log(`📌 [direct_answer] 完成 | answer="${String(res.content).slice(0, 100)}"`);
     return { finalAnswer: String(res.content), messages: [res] };
   }
 
   private async simpleRetrieval(state: any) {
     const userMsg = state.messages[state.messages.length - 1];
     const query = typeof userMsg.content === "string" ? userMsg.content : "";
-    this.logger.debug(`📌 [simple_retrieval] 进入 | query="${query.slice(0, 60)}"`);
+    this.logger.log(`📌 [simple_retrieval] 进入 | query="${query.slice(0, 60)}"`);
 
     const emb = await this.embed(query);
     const result = await this.search.searchWithThreshold(
@@ -150,7 +150,7 @@ export class RAGService implements OnModuleInit {
       { useES: false, useNeo4j: false },
     );
 
-    this.logger.debug(
+    this.logger.log(
       `📌 [simple_retrieval] 完成 | 检索结果=${result.results.length}条 degraded=${result.degraded}`,
     );
 

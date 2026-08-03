@@ -15,7 +15,7 @@ export function routeByIntent(state: AgentStateType): string {
     case 'followup': route = 'followup'; break;
     default: route = 'chat'; break;
   }
-  logger.debug(`🔀 [routeByIntent] intent="${intent}" → ${route}`);
+  logger.log(`🔀 [routeByIntent] intent="${intent}" → ${route}`);
   return route;
 }
 
@@ -25,7 +25,7 @@ export function decideNext(state: AgentStateType): string {
   const hasTools = lastMsg?.tool_calls && lastMsg.tool_calls.length > 0;
   const canContinue = state.toolCallsRemaining > 0;
   const decision = (hasTools && canContinue) ? 'tools' : 'answer';
-  logger.debug(
+  logger.log(
     `🔀 [decideNext] hasTools=${hasTools} remaining=${state.toolCallsRemaining} → ${decision}`,
   );
   return decision;

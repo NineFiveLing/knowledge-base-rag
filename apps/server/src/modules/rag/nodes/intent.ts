@@ -1,6 +1,7 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { AgentStateType } from '../state';
+import { MemoryService } from '../../memory/memory.service';
 import { LangfuseService } from '../../../common/observability/langfuse.service';
 import { Logger } from '@nestjs/common';
 
@@ -39,7 +40,7 @@ function detectFollowUp(message: string, history: Array<{ role: string; content:
 }
 
 /** 创建意图分类节点 */
-export function createIntentClassifier(llm: ChatOpenAI, langfuse?: LangfuseService) {
+export function createIntentClassifier(llm: ChatOpenAI, memory: MemoryService, langfuse?: LangfuseService) {
   return async function classifyIntent(state: AgentStateType): Promise<Partial<AgentStateType>> {
     const startTime = Date.now();
     const lastMsg = state.messages[state.messages.length - 1];
@@ -47,12 +48,17 @@ export function createIntentClassifier(llm: ChatOpenAI, langfuse?: LangfuseServi
 
     let intent: string;
 
-    // 追问检测（规则层，优先于 LLM 分类）
-    const history = state.messages.slice(0, -1).map(m => ({
-      role: m.getType?.() ?? 'unknown',
-      content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-    }));
-    if (detectFollowUp(content, history)) {
+    // 追问检测（规则层，优先于 LLM 分类）—— 从 Redis 加载对话历史
+    const ctx = await memory.buildPromptContext(state.sessionId, state.userId);
+    const historyMessages: Array<{ role: string; content: string }> = ctx.history
+      ? ctx.history.split('\n').filter(Boolean).map(line => {
+          const colonIdx = line.indexOf(': ');
+          if (colonIdx === -1) return { role: 'unknown', content: line };
+          const role = line.slice(0, colonIdx) === 'user' ? 'human' : 'assistant';
+          return { role, content: line.slice(colonIdx + 2) };
+        })
+      : [];
+    if (detectFollowUp(content, historyMessages)) {
       intent = 'followup';
     } else if (/^(记住|请记住|帮我记住)/.test(content)) {
       // 检测"记住xxx"模式
@@ -69,7 +75,7 @@ export function createIntentClassifier(llm: ChatOpenAI, langfuse?: LangfuseServi
       langfuse.endSpan(span, { intent, latencyMs: Date.now() - startTime });
     }
 
-    logger.debug(`📌 [intent_classifier] 进入 → 意图="${intent}" query="${content.slice(0, 60)}" latency=${Date.now() - startTime}ms`);
+    logger.log(`📌 [intent_classifier] 进入 → 意图="${intent}" query="${content.slice(0, 60)}" historyMsgs=${historyMessages.length} latency=${Date.now() - startTime}ms`);
     return { intent };
   };
 }

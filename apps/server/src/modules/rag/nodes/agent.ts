@@ -29,8 +29,8 @@ export function createAgentNode(llm: ChatOpenAI, tools: any[], memory: MemorySer
     // 加载三层记忆上下文：增量摘要 + 近期历史 + 长期记忆
     const ctx = await memory.buildPromptContext(state.sessionId, state.userId);
 
-    // ── 调试输出：记忆使用情况 ──
-    logger.debug(
+    // ── 节点流转日志 ──
+    logger.log(
       `📌 [agent] 进入 | session=${state.sessionId} userId=${state.userId} | ` +
       `增量摘要: ${ctx.summary.length}字符 | ` +
       `近期历史: ${ctx.history.length}字符 | ` +
@@ -51,6 +51,12 @@ export function createAgentNode(llm: ChatOpenAI, tools: any[], memory: MemorySer
 
     const res = await llmTools.invoke(messages);
 
+    // ── LLM 思考过程日志 ──
+    const thinking = String(res.content || '').trim();
+    if (thinking) {
+      logger.log(`🧠 [agent] LLM推理: "${thinking.slice(0, 300)}${thinking.length > 300 ? '...' : ''}"`);
+    }
+
     // 记录 Agent LLM generation
     if (langfuse?.isEnabled() && state.langfuseTraceId) {
       const toolCalls = (res as AIMessage).tool_calls?.map((tc: any) => tc.name) || [];
@@ -63,7 +69,7 @@ export function createAgentNode(llm: ChatOpenAI, tools: any[], memory: MemorySer
     }
 
     const toolCalls = (res as AIMessage).tool_calls?.map((tc: any) => tc.name) || [];
-    logger.debug(
+    logger.log(
       `📌 [agent] 完成 | toolCalls=[${toolCalls.join(', ') || '无'}] ` +
       `剩余轮次=${state.toolCallsRemaining} latency=${Date.now() - startTime}ms`,
     );
@@ -80,7 +86,7 @@ export function createFollowUpAgentNode(llm: ChatOpenAI, tools: any[], memory: M
   const agentReAct = createAgentNode(llm, tools, memory, langfuse);
 
   return async function agentFollowUp(state: AgentStateType): Promise<Partial<AgentStateType>> {
-    logger.debug(`📌 [agent_followup] 进入 | toolCallsRemaining→1 (追问模式，仅1轮工具调用)`);
+    logger.log(`📌 [agent_followup] 进入 | toolCallsRemaining→1 (追问模式，仅1轮工具调用)`);
     // 首次进入时限制工具调用轮次为 1（追问模式轻量检索）
     const result = await agentReAct(state);
     return {

@@ -7,6 +7,7 @@ export function useVoiceChat(_sessionId: string) {
   const [isRecording, setIsRecording] = useState(false);
   const [asrText, setAsrText] = useState('');
   const [triggerMessage, setTriggerMessage] = useState<string | null>(null);
+  const [voiceSocket, setVoiceSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
   // AudioContext 相关引用（用于 stopRecording 清理）
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -14,10 +15,16 @@ export function useVoiceChat(_sessionId: string) {
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const connect = useCallback(() => {
+  const connect = useCallback((sessionId?: string) => {
     const wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:3001';
     const socket = io(`${wsUrl}/voice`);
     socketRef.current = socket;
+    setVoiceSocket(socket);
+
+    // 注册应用层 sessionId，使 ChatService 能通过 sessionId 找到此 voice socket
+    socket.on('connect', () => {
+      if (sessionId) socket.emit('register', sessionId);
+    });
 
     socket.on('asrResult', (data: { text: string; isFinal: boolean; error?: string }) => {
       if (data.error) {
@@ -106,6 +113,7 @@ export function useVoiceChat(_sessionId: string) {
   }, []);
 
   return {
+    socket: voiceSocket,
     isRecording,
     asrText,
     triggerMessage,

@@ -144,6 +144,50 @@ body,
   padding-bottom: 4px;
 }
 
+/* 调试信息：增强提示词 */
+.chat-prompt-debug {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.chat-prompt-debug > summary {
+  color: #8b8b8b;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+}
+.chat-prompt-debug > summary:hover {
+  color: #1677ff;
+}
+.chat-prompt-debug-content {
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: #f5f5f5;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #555;
+  line-height: 1.6;
+}
+.chat-prompt-debug-inner {
+  margin-top: 6px;
+}
+.chat-prompt-debug-inner > summary {
+  color: #8b8b8b;
+  cursor: pointer;
+  font-size: 11px;
+}
+.chat-prompt-debug-inner pre {
+  margin-top: 4px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
 /* 来源卡片 */
 .source-card {
   display: flex;

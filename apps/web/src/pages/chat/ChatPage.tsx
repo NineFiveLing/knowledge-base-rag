@@ -3,24 +3,18 @@ import { Input, Button, message as antMsg } from 'antd';
 import { SendOutlined, UserOutlined, RobotOutlined } from '@ant-design/icons';
 import { useSSE } from '../../hooks/useSSE';
 import { useVoiceChat } from '../../hooks/useVoiceChat';
+import { useTtsPlayer } from '../../hooks/useTtsPlayer';
 import VoiceButton from '../../components/chat/VoiceButton';
 import ConversationList from '../../components/chat/ConversationList';
 import { SourceCard } from '../../components/chat/SourceCard';
 import type { SourceRef } from '../../components/chat/SourceCard';
 import DocumentDetailDrawer from '../../components/document/DocumentDetailDrawer';
-
-interface Message { role: 'user' | 'assistant'; content: string; sources?: SourceRef[]; }
-
-interface ConvLive {
-  streaming: string;
-  thinking: boolean;
-  sources: SourceRef[];
-}
+import { chatStore, type ChatMessage, type ConvLive } from '../../stores/chat.store';
 
 /** AI 问答页面：左侧对话列表 + 右侧流式 SSE 聊天区 + 语音输入支持 */
 export default function ChatPage() {
   // ── 当前展示的对话 state ──
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState('');
   const [input, setInput] = useState('');
   const [sourceDetailDocId, setSourceDetailDocId] = useState<string | null>(null);
@@ -30,28 +24,42 @@ export default function ChatPage() {
 
   const { sendMessage, abortConv } = useSSE();
   const sessionId = useRef(`sess-${Date.now()}`).current;
-  const { isRecording, asrText, triggerMessage, connect, startRecording, stopRecording, clearTrigger } = useVoiceChat(sessionId);
+  const { socket: voiceSocket, isRecording, asrText, triggerMessage, connect, startRecording, stopRecording, clearTrigger } = useVoiceChat(sessionId);
+  const { startPlayer, stopPlayer } = useTtsPlayer(voiceSocket);
 
   // ── 跨对话状态管理 ──
   const activeConvRef = useRef<string | null>(null);
-  // 每对话的 SSE 实时状态（切换对话时不丢失）
-  const convLiveRef = useRef<Map<string, ConvLive>>(new Map());
-  // 每对话的已加载消息（避免每次切换都重新 fetch）
-  const convMessagesRef = useRef<Map<string, Message[]>>(new Map());
   // 当前 SSE 流所属的会话（用于判断 token/onDone 归属，避免 setState 异步导致的 ref 不同步）
   const currentSSEConvRef = useRef<string | null>(null);
   // 最新 state 的 ref 镜像，用于 useCallback 中读取最新值而不依赖 state
-  const messagesRef = useRef<Message[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]);
   const streamingRef = useRef('');
   const thinkingRef = useRef(false);
   const sourcesRef = useRef<SourceRef[]>([]);
+  const promptContextRef = useRef<ChatMessage['promptContext']>(null);
   const inputRef = useRef('');
   // 消息列表容器 ref，用于自动滚动
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // ── 路由切回时从 store 恢复状态（防止消息消失） ──
   useEffect(() => {
-    activeConvRef.current = activeConvId;
-  }, [activeConvId]);
+    const storedConvId = chatStore.activeConvId;
+    if (storedConvId && storedConvId !== activeConvRef.current) {
+      const live = chatStore.convLiveMap.get(storedConvId);
+      if (live) {
+        setStreaming(live.streaming);
+        setThinking(live.thinking);
+        sourcesRef.current = live.sources;
+      }
+      const msgs = chatStore.convMessagesMap.get(storedConvId);
+      if (msgs && msgs.length > 0) {
+        setMessages(msgs);
+      }
+      activeConvRef.current = storedConvId;
+      setActiveConvId(storedConvId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── 自动滚动到最新消息（RAF 节流，流式期间 instant 避免 smooth 堆积卡顿） ──
   const scrollRafRef = useRef<number | null>(null);
@@ -72,12 +80,37 @@ export default function ChatPage() {
     };
   }, [messages, streaming, thinking, scrollToBottom]);
 
-  // ── WebSocket 语音生命周期 ──
+  // ── 组件卸载时保存当前状态到 chatStore（防止路由切换丢失） ──
   useEffect(() => {
-    const socket = connect();
-    return () => { socket?.disconnect(); };
+    return () => {
+      if (activeConvRef.current) {
+        chatStore.convLiveMap.set(activeConvRef.current, {
+          streaming: streamingRef.current,
+          thinking: thinkingRef.current,
+          sources: sourcesRef.current,
+        });
+        const msgs = messagesRef.current;
+        if (msgs.length > 0) {
+          chatStore.convMessagesMap.set(activeConvRef.current, msgs);
+        }
+      }
+    };
+  }, []);
+
+  // ── WebSocket 语音生命周期（含 TTS 播放器） ──
+  useEffect(() => {
+    const socket = connect(sessionId);
+    return () => {
+      stopPlayer();
+      socket?.disconnect();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // socket 就绪后启动 TTS 播放器
+  useEffect(() => {
+    if (voiceSocket) startPlayer();
+  }, [voiceSocket, startPlayer]);
 
   // ── 发送消息 ──
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -88,10 +121,20 @@ export default function ChatPage() {
 
     currentSSEConvRef.current = activeConvRef.current;
 
-    // 用户消息
-    setMessages((prev) => [...prev, { role: 'user', content: text }]);
+    // 用户消息（幂等守卫防止重复添加）
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last?.role === 'user' && last?.content === text) return prev;
+      return [...prev, { role: 'user', content: text }];
+    });
+    // 同步写入 chatStore，防止路由切换后用户消息丢失
+    if (activeConvRef.current) {
+      chatStore.appendMessage(activeConvRef.current, { role: 'user', content: text });
+      chatStore.convLiveMap.set(activeConvRef.current, { streaming: '', thinking: true, sources: [] });
+    }
     setStreaming('');
     sourcesRef.current = [];
+    promptContextRef.current = null;
     setThinking(true);
 
     // 有新消息时刷新对话列表（修复已存在对话不更新排序的 bug）
@@ -107,10 +150,10 @@ export default function ChatPage() {
         if (activeConvRef.current !== currentSSEConvRef.current) {
           // 后台 SSE：更新 live map
           const key = currentSSEConvRef.current || '__orphan__';
-          const live = convLiveRef.current.get(key) || { streaming: '', thinking: false, sources: [] };
+          const live = chatStore.convLiveMap.get(key) || { streaming: '', thinking: false, sources: [] };
           live.thinking = false;
           live.streaming += token;
-          convLiveRef.current.set(key, live);
+          chatStore.convLiveMap.set(key, live);
           return;
         }
         setThinking(false);
@@ -121,13 +164,11 @@ export default function ChatPage() {
         if (activeConvRef.current !== currentSSEConvRef.current) {
           // 后台 SSE 完成：将消息持久化到缓存
           const key = currentSSEConvRef.current || '__orphan__';
-          const live = convLiveRef.current.get(key);
+          const live = chatStore.convLiveMap.get(key);
           if (live?.streaming) {
-            const cached = convMessagesRef.current.get(key) || [];
-            cached.push({ role: 'assistant' as const, content: live.streaming, sources: live.sources?.length ? live.sources : undefined });
-            convMessagesRef.current.set(key, cached);
+            chatStore.appendMessage(key, { role: 'assistant' as const, content: live.streaming, sources: live.sources?.length ? live.sources : undefined, promptContext: promptContextRef.current ?? undefined });
           }
-          convLiveRef.current.delete(key);
+          chatStore.convLiveMap.delete(key);
           // 后台流结束后也刷新列表
           setTimeout(() => {
             window.dispatchEvent(new CustomEvent('refresh-conversations'));
@@ -139,19 +180,18 @@ export default function ChatPage() {
         // React StrictMode 会双重调用 updater，导致 setMessages 排队两次 → 重复消息
         const finalText = streamingRef.current;
         const finalSources = sourcesRef.current.length > 0 ? [...sourcesRef.current] : undefined;
+        const finalPromptCtx = promptContextRef.current;
         if (finalText) {
           setMessages((msgs) => {
             // 避免 fetch ↔ onDone 竞态重复：
             // 若 fetch 已恢复持久化的 assistant 消息（末条已是 assistant），
             // 说明后端 saveMessage 在 onDone 前完成，不再追加第二条
             if (msgs[msgs.length - 1]?.role === 'assistant') return msgs;
-            return [...msgs, { role: 'assistant', content: finalText, sources: finalSources }];
+            return [...msgs, { role: 'assistant', content: finalText, sources: finalSources, promptContext: finalPromptCtx ?? undefined }];
           });
           // 同步到缓存
           if (currentSSEConvRef.current) {
-            const cached = convMessagesRef.current.get(currentSSEConvRef.current) || [];
-            cached.push({ role: 'assistant', content: finalText, sources: finalSources });
-            convMessagesRef.current.set(currentSSEConvRef.current, cached);
+            chatStore.appendMessage(currentSSEConvRef.current, { role: 'assistant', content: finalText, sources: finalSources, promptContext: finalPromptCtx ?? undefined });
           }
         }
         setStreaming('');
@@ -164,10 +204,10 @@ export default function ChatPage() {
       (srcs) => {
         if (activeConvRef.current !== currentSSEConvRef.current) {
           const key = currentSSEConvRef.current || '__orphan__';
-          const live = convLiveRef.current.get(key);
+          const live = chatStore.convLiveMap.get(key);
           if (live) {
             live.sources = srcs;
-            convLiveRef.current.set(key, live);
+            chatStore.convLiveMap.set(key, live);
           }
           return;
         }
@@ -180,12 +220,17 @@ export default function ChatPage() {
           // 同步更新两个 ref，避免 onToken/onDone 因 setState 异步而错误路由到后台
           currentSSEConvRef.current = newConvId;
           activeConvRef.current = newConvId;
+          chatStore.setActiveConv(newConvId);
           setActiveConvId(newConvId);
           // 刷新列表（新建会话时）
           setTimeout(() => {
             window.dispatchEvent(new CustomEvent('refresh-conversations'));
           }, 300);
         }
+      },
+      // onPromptContext — 展示增强后的提示词（包含检索记忆信息）
+      (ctx) => {
+        promptContextRef.current = ctx;
       },
     );
   }, [sendMessage, sessionId]); // sendMessage / sessionId 均为稳定引用
@@ -205,7 +250,7 @@ export default function ChatPage() {
 
     // 不中断旧对话的 SSE！保存当前 live 状态 + messages 缓存
     if (activeConvRef.current) {
-      convLiveRef.current.set(activeConvRef.current, {
+      chatStore.convLiveMap.set(activeConvRef.current, {
         streaming: streamingRef.current,
         thinking: thinkingRef.current,
         sources: sourcesRef.current,
@@ -213,13 +258,13 @@ export default function ChatPage() {
       // 保存当前 messages 到缓存，防止切换回时消息丢失（修复消息消失 bug）
       const currentMessages = messagesRef.current;
       if (currentMessages.length > 0) {
-        convMessagesRef.current.set(activeConvRef.current, currentMessages);
+        chatStore.convMessagesMap.set(activeConvRef.current, currentMessages);
       }
     }
 
     // ── 先恢复目标对话的 live 状态，再更新 activeConvRef ──
     // 避免 SSE onToken 在 ref 已更新但 live 尚未恢复时覆盖流式状态
-    const live = convLiveRef.current.get(convId);
+    const live = chatStore.convLiveMap.get(convId);
     if (live) {
       setStreaming(live.streaming);
       setThinking(live.thinking);
@@ -232,6 +277,7 @@ export default function ChatPage() {
 
     // 同步更新 ref（SSE 回调据此判断前台/后台路由）
     activeConvRef.current = convId;
+    chatStore.setActiveConv(convId);
     setActiveConvId(convId);
     setLoadingHistory(true);
 
@@ -241,12 +287,12 @@ export default function ChatPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      const msgs: Message[] = data.messages.map((m: any) => ({
+      const msgs: ChatMessage[] = data.messages.map((m: any) => ({
         role: m.role,
         content: m.content,
         sources: m.sources || undefined,
       }));
-      convMessagesRef.current.set(convId, msgs);
+      chatStore.convMessagesMap.set(convId, msgs);
       setMessages(msgs);
     } catch {
       antMsg.error('加载对话失败');

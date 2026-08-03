@@ -59,11 +59,15 @@ export class ChatService {
 
     // ── TTS 并行流式输出状态 ──
     let ttsStarted = false;
-    let ttsActive = false;
+    let ttsConnecting = false;
+    let ttsReady = false;
     let ttsPaused = false;
     let textBuffer = '';
     const TTS_DELAY_CHARS = 5;
     const voiceSocket = this.voiceGateway.getVoiceSocket(sessionId);
+    if (!voiceSocket) {
+      this.logger.warn(`🔇 TTS 跳过：没有 voice socket 连接 (sessionId=${sessionId})，请确认前端已连接 /voice namespace`);
+    }
 
     // 流式 RAG 回答
     const traceId = this.langfuse.createTrace('chat', { query: message }, userId, sessionId);
@@ -122,14 +126,20 @@ export class ChatService {
       const eventName2 = (event as any).name;
 
       // ── 追踪当前 graph 节点 ──
+      const graphNodes = new Set(['intent_classifier', 'direct_answer', 'simple_retrieval', 'agent', 'agent_followup', 'retrieval_tools', 'generate_answer']);
       if (eventName === 'on_chain_start' && eventName2) {
-        const graphNodes = new Set(['intent_classifier', 'direct_answer', 'simple_retrieval', 'agent', 'agent_followup', 'retrieval_tools', 'generate_answer']);
         if (graphNodes.has(eventName2)) {
           currentNode = eventName2;
+          this.logger.log(`🔄 [Graph] 进入节点: ${eventName2}`);
           if (ANSWER_NODES.has(eventName2)) {
             fullAnswer = '';
             pendingBuffer = '';
           }
+        }
+      }
+      if (eventName === 'on_chain_end' && eventName2) {
+        if (graphNodes.has(eventName2)) {
+          this.logger.log(`✅ [Graph] 离开节点: ${eventName2}`);
         }
       }
 
@@ -147,11 +157,22 @@ export class ChatService {
             textBuffer += token;
             if (textBuffer.length >= TTS_DELAY_CHARS) {
               ttsStarted = true;
-              ttsActive = true;
-              this.startTtsStream(sessionId, textBuffer, voiceSocket);
+              ttsConnecting = true;
+              this.startTtsStream(sessionId, textBuffer, voiceSocket).then(() => {
+                ttsConnecting = false;
+                ttsReady = true;
+                // flush 连接期间缓冲的 tokens
+                if (textBuffer) {
+                  this.tts.feedText(sessionId, textBuffer);
+                  textBuffer = '';
+                }
+              });
             }
-          } else if (ttsActive && !ttsPaused) {
+          } else if (ttsReady && !ttsPaused) {
             this.tts.feedText(sessionId, token);
+          } else if (ttsConnecting) {
+            // TTS 正在连接，继续缓冲 token
+            textBuffer += token;
           }
         }
 
@@ -170,8 +191,11 @@ export class ChatService {
         }
       }
 
-      // ── 节点输出：仅提取 SOURCES 和兜底 fullAnswer ──
+      // ── 节点输出：提取 SOURCES、promptContext 和兜底 fullAnswer ──
       const output = (event.data as any)?.output;
+      if (output?.promptContext) {
+        yield { type: 'promptContext', promptContext: output.promptContext };
+      }
       if (output?.finalAnswer && typeof output.finalAnswer === 'string') {
         const answer = output.finalAnswer;
         if (!sourcesData && answer.includes(SOURCES_PREFIX)) {
@@ -209,8 +233,12 @@ export class ChatService {
       }
     }
 
-    // 流结束后 end TTS
-    if (ttsActive) {
+    // 流结束后 flush 残留 TTS buffer + end TTS
+    if (ttsReady && textBuffer) {
+      this.tts.feedText(sessionId, textBuffer);
+      textBuffer = '';
+    }
+    if (ttsReady || ttsConnecting) {
       this.tts.endSession(sessionId);
     }
 
@@ -290,6 +318,7 @@ export class ChatService {
   /** 启动 TTS 流式合成（异步，不阻塞 SSE） */
   private async startTtsStream(sessionId: string, initialText: string, socket: any) {
     try {
+      this.logger.log(`🔊 TTS 开始连接: session=${sessionId}`);
       await this.tts.startSession(sessionId, {
         onAudioChunk: (buffer: Buffer) => {
           if (socket.connected) {
@@ -297,20 +326,22 @@ export class ChatService {
           }
         },
         onEnd: () => {
+          this.logger.log(`🔊 TTS 合成完成: session=${sessionId}`);
           if (socket.connected) {
             socket.emit('audioEnd');
           }
         },
         onError: (err: Error) => {
-          this.logger.warn(`TTS 错误 [${sessionId}]: ${err.message}`);
+          this.logger.error(`TTS 错误 [${sessionId}]: ${err.message}`);
           if (socket.connected) {
             socket.emit('ttsError', { message: err.message });
           }
         },
       });
+      this.logger.log(`🔊 TTS 已就绪: session=${sessionId} initialText="${initialText.slice(0, 30)}"`);
       this.tts.feedText(sessionId, initialText);
     } catch (err) {
-      this.logger.warn(`TTS 启动失败 [${sessionId}]: ${(err as Error).message}`);
+      this.logger.error(`TTS 启动失败 [${sessionId}]: ${(err as Error).message}`);
     }
   }
 

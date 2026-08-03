@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import type { TtsProvider } from './tts-provider.interface';
 import { AliNlsTtsProvider } from './ali-nls.provider';
+import { TencentTtsProvider } from './tencent.provider';
 
 /** 根据 DEFAULT_TTS_PROVIDER 配置创建对应的 TTS 提供商实例 */
 export function createTtsProvider(config: ConfigService): TtsProvider {
@@ -16,7 +17,19 @@ export function createTtsProvider(config: ConfigService): TtsProvider {
       }
       return new AliNlsTtsProvider(accessKeyId, accessKeySecret, appKey);
     }
+    case 'tencent': {
+      const secretId = config.get('TENCENT_SECRET_ID') || '';
+      const secretKey = config.get('TENCENT_SECRET_KEY') || '';
+      const appId = config.get('TENCENT_APP_ID') || '';
+      if (!secretId || !secretKey) {
+        throw new Error('TENCENT_SECRET_ID/SECRET_KEY 未配置，腾讯云 TTS 不可用');
+      }
+      if (!appId) {
+        throw new Error('TENCENT_APP_ID 未配置，腾讯云 TTS 需要 AppID');
+      }
+      return new TencentTtsProvider(secretId, secretKey, appId);
+    }
     default:
-      throw new Error(`未知 TTS 提供商: ${provider}，可选值: aliyun`);
+      throw new Error(`未知 TTS 提供商: ${provider}，可选值: aliyun, tencent`);
   }
 }

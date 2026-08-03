@@ -1,9 +1,10 @@
 import { useCallback, useRef } from 'react';
 
 interface SSEEvent {
-  type: 'text' | 'sources' | 'conversation';
+  type: 'text' | 'sources' | 'conversation' | 'promptContext';
   content?: string;
   sources?: Array<{ index: number; docId: string; chunkId: string; docName: string; docType: string; docSize: number }>;
+  promptContext?: { hasSummary: boolean; summaryLength: number; hasSystemContext: boolean; systemContextLength: number; hasHistory: boolean; historyLength: number; retrievedChunks: number; systemPrompt: string };
   conversationId?: string;
   isNew?: boolean;
 }
@@ -31,6 +32,7 @@ export function useSSE() {
       onSources?: (sources: Array<{ index: number; docId: string; chunkId: string; docName: string; docType: string; docSize: number }>) => void,
       conversationId?: string | null,
       onConversation?: (conversationId: string, isNew: boolean) => void,
+      onPromptContext?: (ctx: { hasSummary: boolean; summaryLength: number; hasSystemContext: boolean; systemContextLength: number; hasHistory: boolean; historyLength: number; retrievedChunks: number; systemPrompt: string }) => void,
     ) => {
       const controller = new AbortController();
       const convKey = conversationId || '__new__';
@@ -75,6 +77,8 @@ export function useSSE() {
                 onSources(data.sources);
               } else if (data.type === 'conversation' && data.conversationId) {
                 onConversation?.(data.conversationId, data.isNew ?? false);
+              } else if (data.type === 'promptContext' && onPromptContext && data.promptContext) {
+                onPromptContext(data.promptContext);
               }
             } catch { /* skip malformed */ }
           }

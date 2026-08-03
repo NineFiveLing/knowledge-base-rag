@@ -66,6 +66,20 @@ export const AgentState = Annotation.Root({
     reducer: (_, next) => next,
     default: () => 5,
   }),
+  /** 提示词上下文（供前端调试展示增强后的提示词信息） */
+  promptContext: Annotation<{
+    hasSummary: boolean;
+    summaryLength: number;
+    hasSystemContext: boolean;
+    systemContextLength: number;
+    hasHistory: boolean;
+    historyLength: number;
+    retrievedChunks: number;
+    systemPrompt: string;
+  } | null>({
+    reducer: (_, next) => next,
+    default: () => null,
+  }),
 });
 
 export type AgentStateType = typeof AgentState.State;

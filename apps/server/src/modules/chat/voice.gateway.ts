@@ -17,15 +17,29 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server!: Server;
   private readonly logger = new Logger(VoiceGateway.name);
   private sessions = new Map<string, { isListening: boolean; client: Socket }>();
+  /** 应用层 sessionId → Socket.IO client.id 映射 */
+  private sessionIdToClient = new Map<string, string>();
 
   constructor(
     private readonly asrService: AsrService,
     private readonly ttsService: TtsService,
   ) {}
 
-  /** 供 ChatService 获取 voice socket（sessionId = Socket.IO client.id） */
+  /** 供 ChatService 获取 voice socket（sessionId = 应用层 sessionId） */
   getVoiceSocket(sessionId: string): Socket | undefined {
+    const clientId = this.sessionIdToClient.get(sessionId);
+    if (clientId) {
+      return this.server?.sockets?.sockets?.get(clientId);
+    }
+    // 兼容旧逻辑：直接作为 client.id 查找
     return this.server?.sockets?.sockets?.get(sessionId);
+  }
+
+  /** 注册应用层 sessionId → Socket.IO client.id 映射 */
+  @SubscribeMessage('register')
+  handleRegister(client: Socket, sessionId: string): void {
+    this.logger.log(`Voice session 注册: sessionId=${sessionId} → clientId=${client.id}`);
+    this.sessionIdToClient.set(sessionId, client.id);
   }
 
   handleConnection(client: Socket) {
@@ -36,6 +50,10 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleDisconnect(client: Socket) {
     this.logger.log(`语音客户端断开: ${client.id}`);
     this.sessions.delete(client.id);
+    // 清理 sessionId → clientId 映射
+    for (const [sid, cid] of this.sessionIdToClient) {
+      if (cid === client.id) { this.sessionIdToClient.delete(sid); break; }
+    }
     this.asrService.endSession(client.id).catch((e) => this.logger.error(e));
   }
 

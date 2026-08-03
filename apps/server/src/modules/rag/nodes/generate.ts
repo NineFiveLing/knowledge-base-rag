@@ -1,5 +1,5 @@
 import { ChatOpenAI } from '@langchain/openai';
-import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { Repository, In } from 'typeorm';
 import { AgentStateType } from '../state';
 import { MemoryService } from '../../memory/memory.service';
@@ -79,8 +79,8 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langf
       contextParts.push(`## 近期对话\n${ctx.history}`);
     }
 
-    // ── 调试输出：生成阶段的上下文情况 ──
-    logger.debug(
+    // ── 节点流转日志：生成阶段的上下文情况 ──
+    logger.log(
       `📌 [generate_answer] 进入 | ` +
       `检索chunks=${state.retrievedChunks.length}条 去重后=${deduped.length}条 ` +
       `降级=${state.searchDegraded} | ` +
@@ -93,14 +93,21 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langf
     const userMsg = state.messages.filter((m) => m.getType() === 'human').slice(-1)[0];
     const query = typeof userMsg.content === 'string' ? userMsg.content : '';
 
-    const res = await llm.invoke([new SystemMessage(system), userMsg]);
+    // 流式生成答案（LangGraph streamEvents v2 自动 emit on_chat_model_stream 事件）
+    const stream = await llm.stream([new SystemMessage(system), userMsg]);
+    let fullContent = '';
+    for await (const chunk of stream) {
+      if (typeof chunk.content === 'string') {
+        fullContent += chunk.content;
+      }
+    }
 
     // 记录 LLM generation
     if (langfuse?.isEnabled() && state.langfuseTraceId) {
       langfuse.recordGeneration(state.langfuseTraceId, {
         name: 'answer_generation',
         input: { query, chunksCount: state.retrievedChunks.length },
-        output: { answer: String(res.content) },
+        output: { answer: fullContent },
         model: 'deepseek-chat',
       });
     }
@@ -159,10 +166,25 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langf
 
     // 将来源 JSON 嵌入答案末尾，前端/SSE 层解析后剥离
     const sourcesTag = `\n<!-- SOURCES:${JSON.stringify(sources)} -->`;
+
+    // 构建调试用的提示词上下文（供前端展示增强后的提示词信息）
+    const promptContext = {
+      hasSummary: !!ctx.summary,
+      summaryLength: ctx.summary.length,
+      hasSystemContext: !!ctx.systemContext,
+      systemContextLength: ctx.systemContext.length,
+      hasHistory: !!ctx.history,
+      historyLength: ctx.history.length,
+      retrievedChunks: deduped.length,
+      systemPrompt: system.slice(0, 2000), // 截取前 2000 字符供前端展示
+    };
+
+    const aiMsg = new AIMessage(fullContent);
     return {
-      finalAnswer: String(res.content) + sourcesTag,
-      messages: [res],
+      finalAnswer: fullContent + sourcesTag,
+      messages: [aiMsg],
       sources,
+      promptContext,
     };
   };
 }

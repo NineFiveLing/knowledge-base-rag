@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Document, DocumentStatus, DocumentVisibility } from './entities/document.entity';
 import { Folder } from '../knowledge-base/entities/folder.entity';
+import { KnowledgeBase } from '../knowledge-base/entities/knowledge-base.entity';
 import { RustFSService } from '../../database/rustfs/rustfs.service';
 import { MongoDBService } from '../../database/mongodb/mongodb.service';
 import { ElasticsearchService } from '../../database/elasticsearch/es.service';
@@ -48,6 +49,7 @@ export class DocumentService {
     @InjectRepository(Document) private docRepo: Repository<Document>,
     @InjectRepository(DocumentVersion) private versionRepo: Repository<DocumentVersion>,
     @InjectRepository(Folder) private folderRepo: Repository<Folder>,
+    @InjectRepository(KnowledgeBase) private kbRepo: Repository<KnowledgeBase>,
     private rustfs: RustFSService,
     private mongo: MongoDBService,
     private indexerService: IndexerService,
@@ -70,6 +72,7 @@ export class DocumentService {
     uploaderId: string,
     deptId: string,
     folderId?: string,
+    kbId?: string,
   ) {
     file.originalname = fixEncoding(file.originalname);
     const uploadedUrls: string[] = [];
@@ -97,6 +100,13 @@ export class DocumentService {
       }
 
       // 4. 先存 Postgres（获取 UUID），再存 MongoDB
+      // 确定 kb_id：若指定了 folder_id，从文件夹获取 kb_id 覆盖
+      let resolvedKbId = kbId || null;
+      if (folderId) {
+        const folder = await this.folderRepo.findOne({ where: { id: folderId } });
+        if (folder) resolvedKbId = folder.kb_id;
+      }
+
       // 先创建 Postgres 记录以获取 UUID
       const doc = this.docRepo.create({
         name: file.originalname,
@@ -108,6 +118,7 @@ export class DocumentService {
         rustfs_file_url: fileUrl,
         status: DocumentStatus.PARSED,
         folder_id: folderId || null,
+        kb_id: resolvedKbId,
       });
       saved = await this.docRepo.save(doc);
 
@@ -185,6 +196,7 @@ export class DocumentService {
         'doc.uploader_id',
         'doc.dept_id',
         'doc.folder_id',
+        'doc.kb_id',
         'doc.created_at',
         'doc.updated_at',
       ])
@@ -207,20 +219,14 @@ export class DocumentService {
       qb.andWhere('doc.name ILIKE :kw', { kw: `%${keyword}%` });
     }
 
-    // 按 folder_id 或 kb_id 过滤
+    // 按 kb_id 过滤（直接走索引，替代之前查文件夹 ID 再 IN 的方式）
+    if (dto.kb_id) {
+      qb.andWhere('doc.kb_id = :kbId', { kbId: dto.kb_id });
+    }
+
+    // 按 folder_id 过滤（保持不变）
     if (dto.folder_id) {
       qb.andWhere('doc.folder_id = :folderId', { folderId: dto.folder_id });
-    } else if (dto.kb_id) {
-      const folderIds = await this.folderRepo.find({
-        where: { kb_id: dto.kb_id },
-        select: { id: true },
-      });
-      const ids = folderIds.map(f => f.id);
-      if (ids.length) {
-        qb.andWhere('doc.folder_id IN (:...folderIds)', { folderIds: ids });
-      } else {
-        return { items: [], total: 0, page, pageSize };
-      }
     }
 
     qb.orderBy('doc.created_at', 'DESC')
@@ -318,7 +324,18 @@ export class DocumentService {
     if (dto.visibility !== undefined) doc.visibility = dto.visibility;
     if (dto.dept_id !== undefined) doc.dept_id = dto.dept_id;
 
-    // 支持设置文档所属文件夹
+    // 支持设置文档所属知识库（直接放 KB 下，不选文件夹）
+    if (dto.kb_id !== undefined) {
+      if (dto.kb_id === null || (dto.kb_id as any) === '') {
+        doc.kb_id = null;
+      } else {
+        const kb = await this.kbRepo.findOne({ where: { id: dto.kb_id } });
+        if (!kb) throw new BadRequestException('目标知识库不存在');
+        doc.kb_id = dto.kb_id;
+      }
+    }
+
+    // 支持设置文档所属文件夹（folder_id 变更时同步 kb_id）
     if (dto.folder_id !== undefined) {
       if (dto.folder_id === null || (dto.folder_id as any) === '') {
         doc.folder_id = null;
@@ -326,6 +343,7 @@ export class DocumentService {
         const folder = await this.folderRepo.findOne({ where: { id: dto.folder_id } });
         if (!folder) throw new BadRequestException('目标文件夹不存在');
         doc.folder_id = dto.folder_id;
+        doc.kb_id = folder.kb_id;  // 自动同步
       }
     }
 

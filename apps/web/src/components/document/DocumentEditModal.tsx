@@ -80,7 +80,7 @@ export default function DocumentEditModal({ open, document, onClose, onSuccess }
       await api.patch(`/documents/${document!.id}`, {
         name: values.name,
         visibility: values.visibility,
-        dept_id: values.dept_id || undefined,
+        dept_id: values.dept_id ?? undefined,
         folder_id: values.folder_id ?? null,
         kb_id: values.kb_id ?? null,
       });

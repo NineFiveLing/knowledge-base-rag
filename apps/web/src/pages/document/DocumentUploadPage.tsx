@@ -43,6 +43,11 @@ export default function DocumentUploadPage() {
   }, [selectedKbId]);
 
   const handleUpload = async () => {
+    if (!selectedKbId) {
+      message.warning('请先选择知识库');
+      return;
+    }
+
     const file = fileList[0]?.originFileObj;
     if (!file) return;
 

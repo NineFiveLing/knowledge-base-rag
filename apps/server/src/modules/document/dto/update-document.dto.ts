@@ -20,5 +20,6 @@ export class UpdateDocumentDto {
   folder_id?: string;
 
   @IsOptional()
+  @IsUUID()
   kb_id?: string | null;
 }

@@ -30,12 +30,10 @@ export class KnowledgeBaseService {
     const kbs = await this.kbRepo.find({ order: { created_at: 'DESC' } });
     const results: any[] = [];
     for (const kb of kbs) {
-      const folderIds = await this.getFolderIdsByKb(kb.id);
-      const docCount = folderIds.length
-        ? await this.docRepo.createQueryBuilder('doc')
-            .where('doc.folder_id IN (:...ids)', { ids: folderIds })
-            .getCount()
-        : 0;
+      const docCount = await this.docRepo
+        .createQueryBuilder('doc')
+        .where('doc.kb_id = :kbId', { kbId: kb.id })
+        .getCount();
       results.push({
         id: kb.id,
         name: kb.name,
@@ -163,12 +161,6 @@ export class KnowledgeBaseService {
     const folder = await this.folderRepo.findOne({ where: { id } });
     if (!folder) throw new NotFoundException('文件夹不存在');
     return folder;
-  }
-
-  /** 获取知识库下所有文件夹 ID */
-  private async getFolderIdsByKb(kbId: string): Promise<string[]> {
-    const folders = await this.folderRepo.find({ where: { kb_id: kbId }, select: { id: true } });
-    return folders.map(f => f.id);
   }
 
   /** 检查 targetId 是否是 ancestorId 的子节点（防循环引用） */

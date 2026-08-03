@@ -35,7 +35,7 @@ export default function ChatPage() {
   // 使用 chatStore.sessionId 确保跨路由切换不变化 —— voice socket 和 SSE 必须共用一个 sessionId
   const sessionId = chatStore.sessionId;
   const { socket: voiceSocket, isRecording, asrText, triggerMessage, connect, startRecording, stopRecording, clearTrigger } = useVoiceChat(sessionId);
-  const { startPlayer, stopPlayer } = useTtsPlayer(voiceSocket);
+  const { stopAll } = useTtsPlayer(voiceSocket, () => sessionId);
 
   // ── 跨对话状态管理 ──
   const activeConvRef = useRef<string | null>(null);
@@ -137,16 +137,11 @@ export default function ChatPage() {
   useEffect(() => {
     const socket = connect(sessionId);
     return () => {
-      stopPlayer();
+      stopAll();
       socket?.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // socket 就绪后启动 TTS 播放器
-  useEffect(() => {
-    if (voiceSocket) startPlayer();
-  }, [voiceSocket, startPlayer]);
 
   // ── 发送消息 ──
   // eslint-disable-next-line react-hooks/exhaustive-deps

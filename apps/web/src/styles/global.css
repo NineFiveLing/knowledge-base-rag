@@ -25,8 +25,15 @@ body,
 }
 .chat-messages {
   flex: 1;
-  overflow-y: auto;
+  display: flex;
+  overflow: hidden;
   padding: 20px 0;
+  flex-direction: column;
+}
+
+.chat-messages-list {
+  flex: 1;
+  overflow-y: auto;
 }
 
 /* 消息行：头像 + 气泡 */
@@ -96,13 +103,25 @@ body,
 .thinking-dots .dot-anim {
   animation: dot-bounce 1.2s infinite;
 }
-.thinking-dots .dot-anim:nth-child(1) { animation-delay: 0s; }
-.thinking-dots .dot-anim:nth-child(2) { animation-delay: 0.2s; }
-.thinking-dots .dot-anim:nth-child(3) { animation-delay: 0.4s; }
+.thinking-dots .dot-anim:nth-child(1) {
+  animation-delay: 0s;
+}
+.thinking-dots .dot-anim:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.thinking-dots .dot-anim:nth-child(3) {
+  animation-delay: 0.4s;
+}
 
 @keyframes dot-bounce {
-  0%, 80%, 100% { opacity: 0; }
-  40% { opacity: 1; }
+  0%,
+  80%,
+  100% {
+    opacity: 0;
+  }
+  40% {
+    opacity: 1;
+  }
 }
 
 .chat-loading-hint {
@@ -114,6 +133,12 @@ body,
 .chat-input-area {
   display: flex;
   padding: 0 12px;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.chat-input-area .ant-input {
+  border-radius: 6px;
 }
 
 .voice-btn {
@@ -229,7 +254,11 @@ body,
   flex-shrink: 0;
 }
 
-/* ASR 语音识别预览 */
+/* 下拉菜单中角色标签允许换行 */
+.ant-dropdown .ant-tag {
+  white-space: normal !important;
+  line-height: 18px !important;
+}
 .asr-preview {
   padding: 8px 16px;
   color: #999;
@@ -285,6 +314,12 @@ body,
 }
 
 /* === 对话列表（在 ConversationList 组件中使用） === */
+.conversation-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
 .conversation-list-header {
   display: flex;
   justify-content: space-between;
@@ -297,5 +332,9 @@ body,
   padding: 8px 12px !important;
   border-bottom: 1px solid #f5f5f5;
 }
-.conversation-item:hover { background: #e6f7ff; }
-.conversation-item.active { background: #bae7ff; }
+.conversation-item:hover {
+  background: #e6f7ff;
+}
+.conversation-item.active {
+  background: #bae7ff;
+}

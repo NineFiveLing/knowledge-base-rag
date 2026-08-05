@@ -66,7 +66,7 @@ export default function DocumentUploadPage() {
           if (evt.total) setProgress(Math.round((evt.loaded * 100) / evt.total));
         },
       });
-      message.success(`上传成功 — 文档 ID: ${data.docId}`);
+      message.success('文档上传成功');
       setFileList([]);
       setProgress(0);
     } catch (err: any) {

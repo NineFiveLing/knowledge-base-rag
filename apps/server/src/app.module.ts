@@ -21,6 +21,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { SeedModule } from './database/seeds/seed.module';
 import { ObservabilityModule } from './common/observability/observability.module';
 import { PermissionGuard } from './common/guards/permission.guard';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 
 /** 应用根模块 */
 @Module({

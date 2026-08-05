@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback } from 'react';
-import type { Socket } from 'socket.io-client';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { io, Socket } from 'socket.io-client';
 
 export type MessagePlayState = 'idle' | 'loading' | 'playing' | 'paused';
 
@@ -12,14 +12,43 @@ interface MessageAudioState {
   drainTimer?: ReturnType<typeof setTimeout>;
 }
 
-export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) {
+/** TTS 播放器 Hook：独立 Socket.IO 连接 + AudioContext PCM 播放 */
+export function useTtsPlayer(getSessionId: () => string, autoPlayEnabled: boolean, onToggleAutoPlay: () => void) {
   const messageAudioMapRef = useRef<Map<string, MessageAudioState>>(new Map());
   const activeMessageIdRef = useRef<string | null>(null);
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
   const [messageStates, setMessageStates] = useState<Record<string, MessagePlayState>>({});
-  const [autoPlayEnabled, setAutoPlayEnabled] = useState<boolean>(
-    () => localStorage.getItem('tts-auto-play') !== 'false' // 默认开启
-  );
+  // 待播放队列：socket 未连接时缓存请求，连接后自动播放
+  const pendingPlaysRef = useRef<Array<{ messageId: string; text: string }>>([]);
+  const socketRef = useRef<Socket | null>(null);
+
+  // 从 props 读取自动播放状态
+  const autoPlay = autoPlayEnabled;
+  const toggleAutoPlay = onToggleAutoPlay;
+
+  // 独立管理 TTS socket 连接
+  const playMessageRef = useRef<((messageId: string, text: string) => void) | null>(null);
+
+  useEffect(() => {
+    const wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:3001';
+    const socket = io(wsUrl, { path: '/socket.io/' });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      // 刷新待播放队列
+      const pending = pendingPlaysRef.current;
+      pendingPlaysRef.current = [];
+      if (pending.length > 0) {
+        const latest = pending[pending.length - 1];
+        playMessageRef.current?.(latest.messageId, latest.text);
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, []);
 
   const updateMessageState = useCallback((messageId: string, state: MessagePlayState) => {
     setMessageStates(prev => ({ ...prev, [messageId]: state }));
@@ -41,10 +70,15 @@ export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) 
   }, [updateMessageState]);
 
   const playMessage = useCallback(async (messageId: string, text: string) => {
-    if (!socket?.connected) return;
-    if (!text) return;
+    const s = socketRef.current;
 
-    // 停止当前活跃的消息（含同 ID 重播 —— 防止重复 AudioContext + 事件监听泄漏）
+    // socket 未连接时入队，等待连接后自动播放
+    if (!s?.connected) {
+      pendingPlaysRef.current.push({ messageId, text });
+      return;
+    }
+
+    // 停止当前活跃的消息
     if (activeMessageIdRef.current) {
       stopMessage(activeMessageIdRef.current);
     }
@@ -99,14 +133,14 @@ export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) 
       console.warn('TTS 错误:', payload.message);
     };
 
-    socket.on('audioChunk', onAudioChunk);
-    socket.on('audioEnd', onAudioEnd);
-    socket.on('ttsError', onTtsError);
+    s.on('audioChunk', onAudioChunk);
+    s.on('audioEnd', onAudioEnd);
+    s.on('ttsError', onTtsError);
 
     const eventCleanup = () => {
-      socket.off('audioChunk', onAudioChunk);
-      socket.off('audioEnd', onAudioEnd);
-      socket.off('ttsError', onTtsError);
+      s.off('audioChunk', onAudioChunk);
+      s.off('audioEnd', onAudioEnd);
+      s.off('ttsError', onTtsError);
     };
 
     messageAudioMapRef.current.set(messageId, {
@@ -132,12 +166,12 @@ export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) 
       stopMessage(messageId);
       console.warn('TTS 请求失败:', (err as Error).message);
     }
-  }, [socket, getSessionId, stopMessage, updateMessageState]);
+  }, [getSessionId, stopMessage, updateMessageState]);
+  playMessageRef.current = playMessage;
 
   const pauseMessage = useCallback((messageId: string) => {
     const info = messageAudioMapRef.current.get(messageId);
     if (!info) return;
-    // suspend() 幂等，无需 state guard（Map 中 state 字段可能因异步未同步）
     info.audioCtx.suspend().then(() => {
       updateMessageState(messageId, 'paused');
     }).catch(() => {});
@@ -159,18 +193,10 @@ export function useTtsPlayer(socket: Socket | null, getSessionId: () => string) 
     setActiveMessageId(null);
   }, [stopMessage]);
 
-  const toggleAutoPlay = useCallback(() => {
-    setAutoPlayEnabled(prev => {
-      const next = !prev;
-      localStorage.setItem('tts-auto-play', String(next));
-      return next;
-    });
-  }, []);
-
   return {
     messageStates,
     activeMessageId,
-    autoPlayEnabled,
+    autoPlayEnabled: autoPlay,
     playMessage,
     pauseMessage,
     resumeMessage,

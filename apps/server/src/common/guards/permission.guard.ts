@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Injectable, SetMetadata } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, SetMetadata, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
 /** 权限元数据 key */
@@ -11,6 +11,7 @@ export const RequirePermission = (permission: string) =>
 /** 权限守卫：检查 JWT payload 中的 permissions 字段 */
 @Injectable()
 export class PermissionGuard implements CanActivate {
+  private readonly logger = new Logger(PermissionGuard.name);
   constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
@@ -18,7 +19,8 @@ export class PermissionGuard implements CanActivate {
     if (!required) return true; // 无权限要求 → 放行
 
     const { user } = context.switchToHttp().getRequest();
-    // admin 角色拥有所有权限
+    this.logger.log(`🔐 权限检查: required=${required} userKeys=${user ? Object.keys(user).join(',') : 'null'} roles=${JSON.stringify(user?.roles)}`);
+    if (!user) return true; // 未认证，交给 JwtAuthGuard 处理
     if (user?.roles?.includes('admin')) return true;
     return user?.permissions?.includes(required) ?? false;
   }

@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { message as antMsg } from 'antd';
 
 /** 语音聊天 Hook：AudioContext PCM 采集 + WebSocket 音频上行 + ASR 识别 */
-export function useVoiceChat(_sessionId: string) {
+export function useVoiceChat(_sessionId: string, onVoiceConnect?: () => void) {
   const [isRecording, setIsRecording] = useState(false);
   const [asrText, setAsrText] = useState('');
   const [triggerMessage, setTriggerMessage] = useState<string | null>(null);
@@ -14,6 +14,10 @@ export function useVoiceChat(_sessionId: string) {
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const onConnectRef = useRef(onVoiceConnect);
+  onConnectRef.current = onVoiceConnect;
+  // 记录最后一次成功写入 state 的 ASR 文本（解决同 tick 多个事件导致 prev 相同的问题）
+  const lastCommittedRef = useRef('');
 
   const connect = useCallback((sessionId?: string) => {
     const wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:3001';
@@ -29,6 +33,8 @@ export function useVoiceChat(_sessionId: string) {
       console.log('[Voice] socket 已连接:', socket.id);
       // 连接后再次 register 确保服务端收到（幂等）
       if (sessionId) socket.emit('register', sessionId);
+      // 通知外部 voice socket 已就绪（例如 TTS 刷新待播放队列）
+      if (onConnectRef.current) onConnectRef.current();
     });
 
     socket.on('connect_error', (err) => {
@@ -44,7 +50,36 @@ export function useVoiceChat(_sessionId: string) {
         antMsg.error(data.error);
         return;
       }
-      setAsrText((prev) => (data.isFinal ? data.text : prev + ' ' + data.text));
+      if (!data.text) return;
+      // 去重策略：只追加不重复的部分（标准化后比较，忽略空格/标点差异）
+      const normalize = (s: string) => s.replace(/\s+/g, '').replace(/[，。！？、；：""''（）\s]/g, '');
+      setAsrText((prev) => {
+        const newText = data.text;
+        if (!newText) return prev;
+        const normPrev = normalize(prev);
+        const normNew = normalize(newText);
+        if (normNew === normPrev) return prev;
+        // 新文本已完全包含在旧文本中 → 跳过（后端重复发送）
+        if (normPrev.includes(normNew)) return prev;
+        // 旧文本是新文本的前缀 → 直接用新文本替换（后端发送了完整累积文本）
+        if (normNew.startsWith(normPrev)) {
+          lastCommittedRef.current = newText;
+          return newText;
+        }
+        // 找末尾重叠：只追加不重叠的部分
+        const maxLen = Math.min(normPrev.length, normNew.length);
+        let overlap = 0;
+        for (let len = maxLen; len > 0; len--) {
+          if (normPrev.slice(-len) === normNew.slice(0, len)) {
+            overlap = len;
+            break;
+          }
+        }
+        // 用原始文本计算重叠位置（近似）
+        const result = prev + newText.slice(overlap);
+        lastCommittedRef.current = result;
+        return result;
+      });
     });
 
     socket.on('triggerChat', (data: { message: string; sessionId: string }) => {
@@ -96,7 +131,8 @@ export function useVoiceChat(_sessionId: string) {
       // 4. 通知服务端开始识别
       socketRef.current?.emit('startListening');
       setIsRecording(true);
-      setAsrText('');
+      // 只清空去重追踪，不清空输入框（新录音的内容会增量追加到已有文字上）
+      lastCommittedRef.current = '';
     } catch (err: any) {
       console.error('麦克风访问失败', err);
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
@@ -122,6 +158,7 @@ export function useVoiceChat(_sessionId: string) {
     streamRef.current = null;
 
     setIsRecording(false);
+    lastCommittedRef.current = '';
     socketRef.current?.emit('stopListening');
   }, []);
 

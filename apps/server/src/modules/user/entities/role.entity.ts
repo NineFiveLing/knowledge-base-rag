@@ -13,6 +13,15 @@ export class Role {
   @Column({ unique: true })
   code!: string;
 
+  @Column({ type: 'varchar', length: 20, default: 'custom' })
+  type!: 'admin' | 'dept_admin' | 'custom';
+
+  @Column({ type: 'text', nullable: true })
+  description?: string;
+
+  @Column({ default: false })
+  is_system!: boolean;
+
   @ManyToMany(() => Permission)
   @JoinTable({ name: 'role_permissions' })
   permissions!: Permission[];

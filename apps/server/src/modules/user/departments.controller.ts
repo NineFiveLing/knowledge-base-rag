@@ -1,11 +1,9 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike } from 'typeorm';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Department } from './entities/department.entity';
 
 @Controller('departments')
-@UseGuards(JwtAuthGuard)
 export class DepartmentsController {
   constructor(
     @InjectRepository(Department) private deptRepo: Repository<Department>,

@@ -1,24 +1,24 @@
 import { Button } from "antd";
+import { MessageOutlined, SoundOutlined } from '@ant-design/icons';
 
 interface Props {
   isRecording: boolean;
+  disabled?: boolean;
   onStart: () => void;
   onStop: () => void;
 }
 
-/** 语音按钮：按住说话，松开发送 */
-export default function VoiceButton({ isRecording, onStart, onStop }: Props) {
+/** 语音按钮：点击切换 录音/停止，使用话题图标 */
+export default function VoiceButton({ isRecording, disabled, onStart, onStop }: Props) {
   return (
     <Button
       className={`voice-btn ${isRecording ? "recording" : ""}`}
-      onMouseDown={onStart}
-      onMouseUp={onStop}
-      onMouseLeave={isRecording ? onStop : undefined}
-      onTouchStart={onStart}
-      onTouchEnd={onStop}
+      onClick={isRecording ? onStop : onStart}
       size="large"
+      icon={isRecording ? <SoundOutlined /> : <MessageOutlined />}
+      disabled={!!disabled}
     >
-      {isRecording ? "🎙️ 松开发送" : "🎤 按住说话"}
+      {isRecording ? "点击停止" : "点击说话"}
     </Button>
   );
 }

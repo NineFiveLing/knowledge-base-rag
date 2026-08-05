@@ -1,17 +1,23 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { Input, Button, message as antMsg } from 'antd';
-import { SendOutlined, UserOutlined, RobotOutlined } from '@ant-design/icons';
-import { useSSE } from '../../hooks/useSSE';
-import { useVoiceChat } from '../../hooks/useVoiceChat';
-import { useTtsPlayer, type MessagePlayState } from '../../hooks/useTtsPlayer';
-import MessageTtsButton from '../../components/chat/MessageTtsButton';
-import TtsGlobalControl from '../../components/chat/TtsGlobalControl';
-import VoiceButton from '../../components/chat/VoiceButton';
-import ConversationList from '../../components/chat/ConversationList';
-import { SourceCard } from '../../components/chat/SourceCard';
-import type { SourceRef } from '../../components/chat/SourceCard';
-import DocumentDetailDrawer from '../../components/document/DocumentDetailDrawer';
-import { chatStore, type ChatMessage, type ConvLive } from '../../stores/chat.store';
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Input, Button, message as antMsg } from "antd";
+import { SendOutlined, UserOutlined, RobotOutlined } from "@ant-design/icons";
+import { useSSE } from "../../hooks/useSSE";
+import { useVoiceChat } from "../../hooks/useVoiceChat";
+import { useTtsPlayer, type MessagePlayState } from "../../hooks/useTtsPlayer";
+import MessageTtsButton from "../../components/chat/MessageTtsButton";
+import TtsGlobalControl from "../../components/chat/TtsGlobalControl";
+import VoiceButton from "../../components/chat/VoiceButton";
+import ConversationList from "../../components/chat/ConversationList";
+import { SourceCard } from "../../components/chat/SourceCard";
+import type { SourceRef } from "../../components/chat/SourceCard";
+import DocumentDetailDrawer from "../../components/document/DocumentDetailDrawer";
+import {
+  chatStore,
+  type ChatMessage,
+  type ConvLive,
+} from "../../stores/chat.store";
+import { useAuthStore } from "../../stores/auth.store";
+import api from "../../services/api";
 
 /** 模块级 dispatch：SSE 回调通过此对象更新当前挂载组件的 React state。
  *  旧组件卸载后 dispatch 被置 null，SSE 回调自动降级为仅写 chatStore。
@@ -26,22 +32,69 @@ let chatDispatch: {
 export default function ChatPage() {
   // ── 当前展示的对话 state ──
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [streaming, setStreaming] = useState('');
-  const [input, setInput] = useState('');
-  const [sourceDetailDocId, setSourceDetailDocId] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState("");
+  const [input, setInput] = useState("");
+  const [sourceDetailDocId, setSourceDetailDocId] = useState<string | null>(
+    null,
+  );
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [thinking, setThinking] = useState(false);
+  // TTS 自动播放（从用户配置读取）
+  const [ttsAutoPlay, setTtsAutoPlay] = useState(true);
 
   const { sendMessage, abortConv } = useSSE();
   // 使用 chatStore.sessionId 确保跨路由切换不变化 —— voice socket 和 SSE 必须共用一个 sessionId
   const sessionId = chatStore.sessionId;
-  const { socket: voiceSocket, isRecording, asrText, triggerMessage, connect, startRecording, stopRecording, clearTrigger } = useVoiceChat(sessionId);
-  const { messageStates, activeMessageId, autoPlayEnabled, playMessage, pauseMessage, resumeMessage, stopAll, toggleAutoPlay } = useTtsPlayer(voiceSocket, () => sessionId);
+  const user = useAuthStore((s) => s.user);
+
+  // 加载用户 TTS 偏好
+  useEffect(() => {
+    if (user?.tts_auto_play !== undefined) {
+      setTtsAutoPlay(user.tts_auto_play);
+    }
+  }, [user?.tts_auto_play]);
+
+  // 切换 TTS 自动播放并保存到后端
+  const handleToggleAutoPlay = useCallback(async () => {
+    const newVal = !ttsAutoPlay;
+    setTtsAutoPlay(newVal);
+    try {
+      await api.patch('/auth/me', { tts_auto_play: newVal });
+    } catch {
+      // 保存失败，回滚状态
+      setTtsAutoPlay(!newVal);
+    }
+  }, [ttsAutoPlay]);
+
+  const {
+    messageStates,
+    activeMessageId,
+    autoPlayEnabled,
+    playMessage,
+    pauseMessage,
+    resumeMessage,
+    stopAll,
+    toggleAutoPlay,
+  } = useTtsPlayer(
+    () => sessionId,
+    ttsAutoPlay,
+    handleToggleAutoPlay,
+  );
+
+  const {
+    isRecording,
+    asrText,
+    connect,
+    startRecording,
+    stopRecording,
+  } = useVoiceChat(sessionId);
   const autoPlayRef = useRef(autoPlayEnabled);
   autoPlayRef.current = autoPlayEnabled;
   const stopAllRef = useRef(stopAll);
   stopAllRef.current = stopAll;
+  const stopRecordingRef = useRef(stopRecording);
+  stopRecordingRef.current = stopRecording;
 
   // ── 跨对话状态管理 ──
   const activeConvRef = useRef<string | null>(null);
@@ -49,11 +102,11 @@ export default function ChatPage() {
   const currentSSEConvRef = useRef<string | null>(null);
   // 最新 state 的 ref 镜像，用于 useCallback 中读取最新值而不依赖 state
   const messagesRef = useRef<ChatMessage[]>([]);
-  const streamingRef = useRef('');
+  const streamingRef = useRef("");
   const thinkingRef = useRef(false);
   const sourcesRef = useRef<SourceRef[]>([]);
-  const promptContextRef = useRef<ChatMessage['promptContext']>(null);
-  const inputRef = useRef('');
+  const promptContextRef = useRef<ChatMessage["promptContext"]>(null);
+  const inputRef = useRef("");
   // 消息列表容器 ref，用于自动滚动
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -62,20 +115,25 @@ export default function ChatPage() {
   // useRef 值跨越双挂载周期，导致第二次挂载时因 ref 已设置而跳过恢复。
   useEffect(() => {
     const storedConvId = chatStore.activeConvId;
-    console.log(`[ChatPage] 恢复检查: storedConvId=${storedConvId} activeConvRef=${activeConvRef.current} dispatcher=${!!chatDispatch}`);
+    console.log(
+      `[ChatPage] 恢复检查: storedConvId=${storedConvId} activeConvRef=${activeConvRef.current} dispatcher=${!!chatDispatch}`,
+    );
     if (storedConvId) {
       const live = chatStore.convLiveMap.get(storedConvId);
       const msgs = chatStore.convMessagesMap.get(storedConvId);
-      console.log(`[ChatPage] 恢复数据: convId=${storedConvId} msgsLen=${msgs?.length ?? 0} liveExists=${!!live} liveStreaming=${live?.streaming?.length ?? 0}chars`);
+      console.log(
+        `[ChatPage] 恢复数据: convId=${storedConvId} msgsLen=${msgs?.length ?? 0} liveExists=${!!live} liveStreaming=${live?.streaming?.length ?? 0}chars`,
+      );
       // 若缓存中已有 assistant 消息 → 对话已完成，清除残留的 streaming/thinking
-      const hasAssistantMsg = msgs && msgs.length > 0 && msgs[msgs.length - 1]?.role === 'assistant';
+      const hasAssistantMsg =
+        msgs && msgs.length > 0 && msgs[msgs.length - 1]?.role === "assistant";
       console.log(`[ChatPage] 恢复判断: hasAssistantMsg=${hasAssistantMsg}`);
       if (live && !hasAssistantMsg) {
         setStreaming(live.streaming);
         setThinking(live.thinking);
         sourcesRef.current = live.sources;
       } else if (hasAssistantMsg) {
-        setStreaming('');
+        setStreaming("");
         setThinking(false);
         sourcesRef.current = [];
       }
@@ -92,13 +150,18 @@ export default function ChatPage() {
   // 组件卸载时置 null，SSE 回调自动降级为仅写 chatStore
   useEffect(() => {
     chatDispatch = { setMessages, setStreaming, setThinking };
-    return () => { chatDispatch = null; };
+    return () => {
+      chatDispatch = null;
+    };
   });
 
   // ── 自动滚动到最新消息（RAF 节流，流式期间 instant 避免 smooth 堆积卡顿） ──
   const scrollRafRef = useRef<number | null>(null);
   const scrollToBottom = useCallback((smooth: boolean) => {
-    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'end' });
+    messagesEndRef.current?.scrollIntoView({
+      behavior: smooth ? "smooth" : "auto",
+      block: "end",
+    });
   }, []);
   useEffect(() => {
     if (scrollRafRef.current !== null) return; // 已有待执行的滚动，跳过
@@ -122,7 +185,9 @@ export default function ChatPage() {
         const msgs = messagesRef.current;
         const hasStreaming = streamingRef.current.length > 0;
         const hasThinking = thinkingRef.current;
-        console.log(`[ChatPage] 卸载保存: convId=${activeConvRef.current} msgsLen=${msgs.length} streaming=${streamingRef.current.length}chars thinking=${hasThinking} sourcesCount=${sourcesRef.current.length}`);
+        console.log(
+          `[ChatPage] 卸载保存: convId=${activeConvRef.current} msgsLen=${msgs.length} streaming=${streamingRef.current.length}chars thinking=${hasThinking} sourcesCount=${sourcesRef.current.length}`,
+        );
         // 仅在有流式内容或思考状态时更新 live 状态
         if (hasStreaming || hasThinking) {
           chatStore.convLiveMap.set(activeConvRef.current, {
@@ -151,157 +216,194 @@ export default function ChatPage() {
 
   // ── 发送消息 ──
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const handleSend = useCallback(async (voiceText?: string) => {
-    const text = (voiceText || inputRef.current).trim();
-    if (!text || streamingRef.current) return;
-    if (!voiceText) setInput('');
+  const handleSend = useCallback(
+    async (voiceText?: string) => {
+      const text = (voiceText || inputRef.current).trim();
+      if (!text || streamingRef.current) return;
+      if (!voiceText) setInput("");
 
-    // 捕获当前会话 ID 到闭包（每个 SSE 流绑定自己的 convId，不受后续其他对话
-    // 发送消息时对 chatStore.currentSSESessionConvId 的覆盖影响）。
-    // 使用 let 而非 const：新对话首次发送无 convId，后端创建后通过 onConversation
-    // 回调更新此值，同一条 SSE 流的后续 onToken/onDone 即可路由到正确的 convId。
-    let sseConvId = activeConvRef.current;
-    chatStore.currentSSESessionConvId = sseConvId;
-    currentSSEConvRef.current = sseConvId;
+      // 停止语音输入（如果正在录音）
+      stopRecordingRef.current();
 
-    /** SSE 事件所属会话是否在前台展示（闭包捕获 sseConvId，隔离多 SSE 流） */
-    const isForeground = () => chatStore.activeConvId === sseConvId;
+      // 捕获当前会话 ID 到闭包（每个 SSE 流绑定自己的 convId，不受后续其他对话
+      // 发送消息时对 chatStore.currentSSESessionConvId 的覆盖影响）。
+      // 使用 let 而非 const：新对话首次发送无 convId，后端创建后通过 onConversation
+      // 回调更新此值，同一条 SSE 流的后续 onToken/onDone 即可路由到正确的 convId。
+      let sseConvId = activeConvRef.current;
+      chatStore.currentSSESessionConvId = sseConvId;
+      currentSSEConvRef.current = sseConvId;
 
-    // 用户消息（幂等守卫防止重复添加）
-    setMessages((prev) => {
-      const last = prev[prev.length - 1];
-      if (last?.role === 'user' && last?.content === text) return prev;
-      return [...prev, { role: 'user', content: text }];
-    });
-    // 同步写入 chatStore
-    if (activeConvRef.current) {
-      chatStore.appendMessage(activeConvRef.current, { role: 'user', content: text });
-      chatStore.convLiveMap.set(activeConvRef.current, { streaming: '', thinking: true, sources: [] });
-    }
-    setStreaming('');
-    sourcesRef.current = [];
-    promptContextRef.current = null;
-    setThinking(true);
+      /** SSE 事件所属会话是否在前台展示（闭包捕获 sseConvId，隔离多 SSE 流） */
+      const isForeground = () => chatStore.activeConvId === sseConvId;
 
-    // 有新消息时刷新对话列表
-    setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('refresh-conversations'));
-    }, 100);
+      // 用户消息（幂等守卫防止重复添加）
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "user" && last?.content === text) return prev;
+        return [...prev, { role: "user", content: text }];
+      });
+      // 同步写入 chatStore
+      if (activeConvRef.current) {
+        chatStore.appendMessage(activeConvRef.current, {
+          role: "user",
+          content: text,
+        });
+        chatStore.convLiveMap.set(activeConvRef.current, {
+          streaming: "",
+          thinking: true,
+          sources: [],
+        });
+      }
+      setStreaming("");
+      sourcesRef.current = [];
+      promptContextRef.current = null;
+      setThinking(true);
 
-    // 生成流式 TTS messageId，前端用于匹配 audioChunk/audioEnd 事件
-    const streamMsgId = `stream-${Date.now()}`;
-    chatStore.setStreamMessageId(sseConvId || '__new__', streamMsgId);
+      // 有新消息时刷新对话列表
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("refresh-conversations"));
+      }, 100);
 
-    await sendMessage(
-      text,
-      sessionId,
-      // ── onToken ──
-      (token) => {
-        const key = sseConvId || '__orphan__';
-        // 始终更新 chatStore live（模块级，卸载不丢）
-        const live = chatStore.convLiveMap.get(key) || { streaming: '', thinking: false, sources: [] };
-        live.thinking = false;
-        live.streaming += token;
-        chatStore.convLiveMap.set(key, live);
+      // 生成流式 TTS messageId，前端用于匹配 audioChunk/audioEnd 事件
+      const streamMsgId = `stream-${Date.now()}`;
+      chatStore.setStreamMessageId(sseConvId || "__new__", streamMsgId);
 
-        // 若当前在前台，同时更新 React state
-        if (isForeground() && chatDispatch) {
-          chatDispatch.setThinking(false);
-          chatDispatch.setStreaming((prev) => prev + token);
-        }
-        // 仅在前 3 个 token 打印，避免刷屏
-        if (live.streaming.length <= 3) {
-          console.log(`[SSE] onToken: key=${key} isFg=${isForeground()} dispatch=${!!chatDispatch} streamingLen=${live.streaming.length}`);
-        }
-      },
-      // ── onDone ──
-      () => {
-        const key = sseConvId || '__orphan__';
-        const live = chatStore.convLiveMap.get(key);
-        const finalText = live?.streaming || streamingRef.current;
-        const finalSources = (live?.sources?.length ? live.sources : sourcesRef.current.length > 0 ? [...sourcesRef.current] : undefined);
-        const finalPromptCtx = promptContextRef.current;
+      await sendMessage(
+        text,
+        sessionId,
+        // ── onToken ──
+        (token) => {
+          const key = sseConvId || "__orphan__";
+          // 始终更新 chatStore live（模块级，卸载不丢）
+          const live = chatStore.convLiveMap.get(key) || {
+            streaming: "",
+            thinking: false,
+            sources: [],
+          };
+          live.thinking = false;
+          live.streaming += token;
+          chatStore.convLiveMap.set(key, live);
 
-        console.log(`[SSE] onDone: key=${key} isFg=${isForeground()} dispatch=${!!chatDispatch} finalTextLen=${finalText?.length ?? 0} liveStreaming=${live?.streaming?.length ?? 0} streamRefLen=${streamingRef.current?.length ?? 0}`);
+          // 若当前在前台，同时更新 React state
+          if (isForeground() && chatDispatch) {
+            chatDispatch.setThinking(false);
+            chatDispatch.setStreaming((prev) => prev + token);
+          }
+          // 仅在前 3 个 token 打印，避免刷屏
+          if (live.streaming.length <= 3) {
+            console.log(
+              `[SSE] onToken: key=${key} isFg=${isForeground()} dispatch=${!!chatDispatch} streamingLen=${live.streaming.length}`,
+            );
+          }
+        },
+        // ── onDone ──
+        () => {
+          const key = sseConvId || "__orphan__";
+          const live = chatStore.convLiveMap.get(key);
+          const finalText = live?.streaming || streamingRef.current;
+          const finalSources = live?.sources?.length
+            ? live.sources
+            : sourcesRef.current.length > 0
+              ? [...sourcesRef.current]
+              : undefined;
+          const finalPromptCtx = promptContextRef.current;
 
-        // 始终持久化到 chatStore
-        if (finalText) {
-          chatStore.appendMessage(key, { role: 'assistant' as const, content: finalText, sources: finalSources, promptContext: finalPromptCtx ?? undefined });
-        }
-        chatStore.convLiveMap.delete(key);
+          console.log(
+            `[SSE] onDone: key=${key} isFg=${isForeground()} dispatch=${!!chatDispatch} finalTextLen=${finalText?.length ?? 0} liveStreaming=${live?.streaming?.length ?? 0} streamRefLen=${streamingRef.current?.length ?? 0}`,
+          );
 
-        // 若当前在前台，同时更新 React state
-        if (isForeground() && chatDispatch) {
-          chatDispatch.setThinking(false);
+          // 始终持久化到 chatStore
           if (finalText) {
-            chatDispatch.setMessages((msgs) => {
-              if (msgs[msgs.length - 1]?.role === 'assistant') return msgs;
-              return [...msgs, { role: 'assistant', content: finalText, sources: finalSources, promptContext: finalPromptCtx ?? undefined }];
+            chatStore.appendMessage(key, {
+              role: "assistant" as const,
+              content: finalText,
+              sources: finalSources,
+              promptContext: finalPromptCtx ?? undefined,
             });
           }
-          chatDispatch.setStreaming('');
-          // 自动播放新消息（需通过 ref 读取最新 autoPlayEnabled，因为 handleSend 依赖不包含它）
-          if (autoPlayRef.current && finalText) {
-            const msgId = `${key}-assistant-${Date.now()}`;
-            setTimeout(() => playMessage(msgId, finalText), 100);
-          }
-        }
-        // 流结束后刷新列表
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('refresh-conversations'));
-        }, 300);
-      },
-      // ── onSources ──
-      (srcs) => {
-        const key = sseConvId || '__orphan__';
-        // 始终更新 chatStore live
-        const live = chatStore.convLiveMap.get(key);
-        if (live) {
-          live.sources = srcs;
-          chatStore.convLiveMap.set(key, live);
-        }
-        // 若当前在前台，同时更新 ref
-        if (isForeground()) {
-          sourcesRef.current = srcs;
-        }
-      },
-      sseConvId,
-      // ── onConversation ──
-      (newConvId, isNew) => {
-        if (isNew && !sseConvId) {
-          // 更新闭包捕获的 sseConvId，使本 SSE 流的后续 onToken/onDone
-          // 路由到正确的 convId（而非 fallback '__orphan__'）
-          sseConvId = newConvId;
-          currentSSEConvRef.current = newConvId;
-          activeConvRef.current = newConvId;
-          chatStore.setActiveConv(newConvId);
-          chatStore.currentSSESessionConvId = newConvId;
-          // 将 streamMessageId 从临时 key 迁移到真实 convId
-          const sid = chatStore.getStreamMessageId('__new__');
-          if (sid) {
-            chatStore.setStreamMessageId(newConvId, sid);
-          }
-          setActiveConvId(newConvId);
-          setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('refresh-conversations'));
-          }, 300);
-        }
-      },
-      // ── onPromptContext ──
-      (ctx) => {
-        promptContextRef.current = ctx;
-      },
-      streamMsgId,
-    );
-  }, [sendMessage, sessionId]);
+          chatStore.convLiveMap.delete(key);
 
-  // ── ASR 语音触发 ──
+          // 若当前在前台，同时更新 React state
+          if (isForeground() && chatDispatch) {
+            chatDispatch.setThinking(false);
+            if (finalText) {
+              chatDispatch.setMessages((msgs) => {
+                if (msgs[msgs.length - 1]?.role === "assistant") return msgs;
+                return [
+                  ...msgs,
+                  {
+                    role: "assistant",
+                    content: finalText,
+                    sources: finalSources,
+                    promptContext: finalPromptCtx ?? undefined,
+                  },
+                ];
+              });
+            }
+            chatDispatch.setStreaming("");
+            // 自动播放新消息（需通过 ref 读取最新 autoPlayEnabled，因为 handleSend 依赖不包含它）
+            if (autoPlayRef.current && finalText) {
+              const msgId = `${key}-assistant-${Date.now()}`;
+              setTimeout(() => playMessage(msgId, finalText), 100);
+            }
+          }
+          // 流结束后刷新列表
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent("refresh-conversations"));
+          }, 300);
+        },
+        // ── onSources ──
+        (srcs) => {
+          const key = sseConvId || "__orphan__";
+          // 始终更新 chatStore live
+          const live = chatStore.convLiveMap.get(key);
+          if (live) {
+            live.sources = srcs;
+            chatStore.convLiveMap.set(key, live);
+          }
+          // 若当前在前台，同时更新 ref
+          if (isForeground()) {
+            sourcesRef.current = srcs;
+          }
+        },
+        sseConvId,
+        // ── onConversation ──
+        (newConvId, isNew) => {
+          if (isNew && !sseConvId) {
+            // 更新闭包捕获的 sseConvId，使本 SSE 流的后续 onToken/onDone
+            // 路由到正确的 convId（而非 fallback '__orphan__'）
+            sseConvId = newConvId;
+            currentSSEConvRef.current = newConvId;
+            activeConvRef.current = newConvId;
+            chatStore.setActiveConv(newConvId);
+            chatStore.currentSSESessionConvId = newConvId;
+            // 将 streamMessageId 从临时 key 迁移到真实 convId
+            const sid = chatStore.getStreamMessageId("__new__");
+            if (sid) {
+              chatStore.setStreamMessageId(newConvId, sid);
+            }
+            setActiveConvId(newConvId);
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent("refresh-conversations"));
+            }, 300);
+          }
+        },
+        // ── onPromptContext ──
+        (ctx) => {
+          promptContextRef.current = ctx;
+        },
+        streamMsgId,
+      );
+    },
+    [sendMessage, sessionId],
+  );
+
+  // ── ASR 语音输入实时显示在输入框（用户手动点发送） ──
   useEffect(() => {
-    if (triggerMessage) {
-      handleSend(triggerMessage);
-      clearTrigger();
+    if (asrText) {
+      setInput(asrText);
     }
-  }, [triggerMessage, handleSend, clearTrigger]);
+  }, [asrText]);
 
   // ── 切换对话 ──
   const handleSelectConv = useCallback(async (convId: string) => {
@@ -312,7 +414,7 @@ export default function ChatPage() {
     stopAllRef.current();
 
     // 清空输入框（防止切换会话时输入文字残留到新会话）
-    setInput('');
+    setInput("");
 
     // 不中断旧对话的 SSE！保存当前 live 状态 + messages 缓存
     if (activeConvRef.current) {
@@ -336,7 +438,7 @@ export default function ChatPage() {
       setThinking(live.thinking);
       sourcesRef.current = live.sources;
     } else {
-      setStreaming('');
+      setStreaming("");
       setThinking(false);
       sourcesRef.current = [];
     }
@@ -348,7 +450,7 @@ export default function ChatPage() {
     setLoadingHistory(true);
 
     try {
-      const token = localStorage.getItem('access_token');
+      const token = localStorage.getItem("access_token");
       const res = await fetch(`/api/chat/conversations/${convId}/messages`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -366,7 +468,7 @@ export default function ChatPage() {
       if (!preferStore) chatStore.convMessagesMap.set(convId, msgs);
       setMessages(finalMsgs);
     } catch {
-      antMsg.error('加载对话失败');
+      antMsg.error("加载对话失败");
     } finally {
       setLoadingHistory(false);
     }
@@ -377,16 +479,18 @@ export default function ChatPage() {
   const displayThinking = thinking;
   // 流式期间从 ref 取 sources（消息尚未写入 messages 数组），
   // 非流式期间从最后一条 assistant 消息的 sources 字段取
-  const displaySources: SourceRef[] = (displayStreaming
-    ? sourcesRef.current
-    : (() => {
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].role === 'assistant' && messages[i].sources) {
-            return messages[i].sources;
+  const displaySources: SourceRef[] = (
+    displayStreaming
+      ? sourcesRef.current
+      : (() => {
+          for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === "assistant" && messages[i].sources) {
+              return messages[i].sources;
+            }
           }
-        }
-        return [];
-      })()) as SourceRef[];
+          return [];
+        })()
+  ) as SourceRef[];
 
   // ── 同步最新 state 到 ref（供 useCallback 中读取，避免依赖频繁更新的 state） ──
   messagesRef.current = messages;
@@ -398,120 +502,178 @@ export default function ChatPage() {
     <div className="chat-layout">
       {/* 左侧对话列表 */}
       <aside className="chat-sidebar">
-        <ConversationList
-          activeId={activeConvId}
-          onSelect={handleSelectConv}
-        />
+        <ConversationList activeId={activeConvId} onSelect={handleSelectConv} />
       </aside>
 
       {/* 右侧聊天区 */}
       <main className="chat-main">
         <div className="chat-messages">
-          {loadingHistory && <div className="chat-loading-hint">加载中…</div>}
+          {/* 顶部工具栏：TTS 自动播放 */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              alignItems: "center",
+              padding: "8px 12px",
+              borderBottom: "1px solid #f0f0f0",
+              marginBottom: 8,
+            }}
+          >
+            <TtsGlobalControl
+              autoPlayEnabled={autoPlayEnabled}
+              onToggle={toggleAutoPlay}
+            />
+          </div>
+          {/* 消息列表 */}
+          <div className="chat-messages-list">
+            {loadingHistory && <div className="chat-loading-hint">加载中…</div>}
 
-          <TtsGlobalControl autoPlayEnabled={autoPlayEnabled} onToggle={toggleAutoPlay} />
-
-          {messages.map((m, i) => (
-            <div key={i} className={`chat-bubble-row ${m.role}`}>
-              <div className={`chat-avatar ${m.role}`}>
-                {m.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
+            {messages.map((m, i) => (
+              <div key={i} className={`chat-bubble-row ${m.role}`}>
+                <div className={`chat-avatar ${m.role}`}>
+                  {m.role === "user" ? <UserOutlined /> : <RobotOutlined />}
+                </div>
+                <div className="chat-bubble-wrapper">
+                  <div className={`chat-bubble ${m.role}`}>{m.content}</div>
+                  {m.role === "assistant" && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                        marginTop: 4,
+                      }}
+                    >
+                      <MessageTtsButton
+                        messageId={`${activeConvId}-msg-${i}`}
+                        text={m.content}
+                        state={
+                          messageStates[`${activeConvId}-msg-${i}`] || "idle"
+                        }
+                        onPlay={playMessage}
+                        onPause={pauseMessage}
+                        onResume={resumeMessage}
+                      />
+                    </div>
+                  )}
+                  {m.role === "assistant" &&
+                    m.sources &&
+                    m.sources.length > 0 && (
+                      <div className="chat-sources">
+                        <div className="chat-sources-header">
+                          <span>📎 参考来源</span>
+                        </div>
+                        <div className="chat-sources-cards">
+                          {m.sources.map((s) => (
+                            <SourceCard
+                              key={s.docId}
+                              source={s}
+                              onClick={() => setSourceDetailDocId(s.docId)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                </div>
               </div>
-              <div className="chat-bubble-wrapper">
-                <div className={`chat-bubble ${m.role}`}>{m.content}</div>
-                {m.role === 'assistant' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+            ))}
+
+            {/* 思考中 */}
+            {displayThinking && (
+              <div className="chat-bubble-row assistant">
+                <div className="chat-avatar assistant">
+                  <RobotOutlined />
+                </div>
+                <div className="chat-bubble assistant thinking">
+                  <span className="thinking-dots">
+                    思考中<span className="dot-anim">.</span>
+                    <span className="dot-anim">.</span>
+                    <span className="dot-anim">.</span>
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* 流式输出 */}
+            {displayStreaming && (
+              <div className="chat-bubble-row assistant">
+                <div className="chat-avatar assistant">
+                  <RobotOutlined />
+                </div>
+                <div className="chat-bubble-wrapper">
+                  <div className="chat-bubble assistant streaming">
+                    {displayStreaming}
+                  </div>
+                  <div className="chat-message-tts">
                     <MessageTtsButton
-                      messageId={`${activeConvId}-msg-${i}`}
-                      text={m.content}
-                      state={messageStates[`${activeConvId}-msg-${i}`] || 'idle'}
+                      messageId={`${activeConvId}-streaming`}
+                      text={displayStreaming}
+                      state={
+                        messageStates[`${activeConvId}-streaming`] || "idle"
+                      }
                       onPlay={playMessage}
                       onPause={pauseMessage}
                       onResume={resumeMessage}
                     />
                   </div>
-                )}
-                {m.role === 'assistant' && m.sources && m.sources.length > 0 && (
-                  <div className="chat-sources">
-                    <div className="chat-sources-header">
-                      <span>📎 参考来源</span>
+                  {displaySources.length > 0 && (
+                    <div className="chat-sources">
+                      <div className="chat-sources-header">
+                        <span>📎 参考来源</span>
+                      </div>
+                      <div className="chat-sources-cards">
+                        {displaySources.map((s) => (
+                          <SourceCard
+                            key={s.docId}
+                            source={s}
+                            onClick={() => setSourceDetailDocId(s.docId)}
+                          />
+                        ))}
+                      </div>
                     </div>
-                    <div className="chat-sources-cards">
-                      {m.sources.map((s) => (
-                        <SourceCard key={s.docId} source={s} onClick={() => setSourceDetailDocId(s.docId)} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {/* 思考中 */}
-          {displayThinking && (
-            <div className="chat-bubble-row assistant">
-              <div className="chat-avatar assistant"><RobotOutlined /></div>
-              <div className="chat-bubble assistant thinking">
-                <span className="thinking-dots">思考中<span className="dot-anim">.</span><span className="dot-anim">.</span><span className="dot-anim">.</span></span>
-              </div>
-            </div>
-          )}
-
-          {/* 流式输出 */}
-          {displayStreaming && (
-            <div className="chat-bubble-row assistant">
-              <div className="chat-avatar assistant"><RobotOutlined /></div>
-              <div className="chat-bubble-wrapper">
-                <div className="chat-bubble assistant streaming">{displayStreaming}</div>
-                <div className="chat-message-tts">
-                  <MessageTtsButton
-                    messageId={`${activeConvId}-streaming`}
-                    text={displayStreaming}
-                    state={messageStates[`${activeConvId}-streaming`] || 'idle'}
-                    onPlay={playMessage}
-                    onPause={pauseMessage}
-                    onResume={resumeMessage}
-                  />
+                  )}
                 </div>
-                {displaySources.length > 0 && (
-                  <div className="chat-sources">
-                    <div className="chat-sources-header">
-                      <span>📎 参考来源</span>
-                    </div>
-                    <div className="chat-sources-cards">
-                      {displaySources.map((s) => (
-                        <SourceCard key={s.docId} source={s} onClick={() => setSourceDetailDocId(s.docId)} />
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
-            </div>
-          )}
+            )}
 
-          {/* 滚动锚点 */}
-          <div ref={messagesEndRef} />
+            {/* 滚动锚点 */}
+            <div ref={messagesEndRef} />
 
-          {/* 空状态 */}
-          {!displayStreaming && !displayThinking && messages.length === 0 && !loadingHistory && (
-            <div className="chat-empty-hint">
-              <div className="chat-empty-icon">💬</div>
-              <h3>AI 知识库问答</h3>
-              <p>输入您的问题，我将从知识库中检索答案</p>
-            </div>
-          )}
+            {/* 空状态 */}
+            {!displayStreaming &&
+              !displayThinking &&
+              messages.length === 0 &&
+              !loadingHistory && (
+                <div className="chat-empty-hint">
+                  <div className="chat-empty-icon">💬</div>
+                  <h3>AI 知识库问答</h3>
+                  <p>输入您的问题，我将从知识库中检索答案</p>
+                </div>
+              )}
+          </div>
         </div>
 
         <div className="chat-input-area">
-          <Input
+          <Input.TextArea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onPressEnter={() => handleSend()}
+            onPressEnter={(e) => {
+              if (!e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
             placeholder="输入您的问题..."
             disabled={!!streaming || thinking}
-            size="large"
-            style={{ flex: 1 }}
+            autoSize={{ minRows: 1, maxRows: 6 }}
+            style={{ flex: 1, resize: 'none' }}
           />
-          <VoiceButton isRecording={isRecording} onStart={startRecording} onStop={stopRecording} />
+          <VoiceButton
+            isRecording={isRecording}
+            disabled={!!(streaming || thinking)}
+            onStart={startRecording}
+            onStop={stopRecording}
+          />
           <Button
             type="primary"
             icon={<SendOutlined />}
@@ -522,7 +684,6 @@ export default function ChatPage() {
             发送
           </Button>
         </div>
-        {asrText && <div className="asr-preview">{asrText}</div>}
       </main>
 
       <DocumentDetailDrawer

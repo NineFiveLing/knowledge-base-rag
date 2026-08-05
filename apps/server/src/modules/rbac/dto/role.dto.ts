@@ -6,6 +6,9 @@ export class CreateRoleDto {
   name!: string;
 
   @IsString() @IsOptional()
+  code?: string;
+
+  @IsString() @IsOptional()
   description?: string;
 
   @IsArray() @IsString({ each: true })

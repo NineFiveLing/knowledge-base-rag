@@ -3,7 +3,6 @@ import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages
 import { Repository, In } from 'typeorm';
 import { AgentStateType } from '../state';
 import { MemoryService } from '../../memory/memory.service';
-import { LangfuseService } from '../../../common/observability/langfuse.service';
 import { Document } from '../../document/entities/document.entity';
 import { Logger } from '@nestjs/common';
 
@@ -54,7 +53,7 @@ function dedupChunks(
 }
 
 /** 创建答案生成节点 */
-export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langfuse?: LangfuseService, docRepo?: Repository<Document>) {
+export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, docRepo?: Repository<Document>) {
   return async function generateAnswer(state: AgentStateType): Promise<Partial<AgentStateType>> {
     const startTime = Date.now();
 
@@ -100,16 +99,6 @@ export function createGenerateNode(llm: ChatOpenAI, memory: MemoryService, langf
       if (typeof chunk.content === 'string') {
         fullContent += chunk.content;
       }
-    }
-
-    // 记录 LLM generation
-    if (langfuse?.isEnabled() && state.langfuseTraceId) {
-      langfuse.recordGeneration(state.langfuseTraceId, {
-        name: 'answer_generation',
-        input: { query, chunksCount: state.retrievedChunks.length },
-        output: { answer: fullContent },
-        model: 'deepseek-chat',
-      });
     }
 
     // 构建来源列表，附带文档名称

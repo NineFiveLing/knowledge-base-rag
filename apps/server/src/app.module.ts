@@ -18,8 +18,8 @@ import { RAGModule } from './modules/rag/rag.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { EvalModule } from './modules/eval/eval.module';
 import { SeedModule } from './database/seeds/seed.module';
-import { ObservabilityModule } from './common/observability/observability.module';
 import { PermissionGuard } from './common/guards/permission.guard';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 
@@ -38,7 +38,8 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
     SeedModule,
     AuthModule, UserModule, DocumentModule, KnowledgeBaseModule,
     SearchModule, MemoryModule,
-    RAGModule, ChatModule, RbacModule, AnalyticsModule, ObservabilityModule,
+    RAGModule, ChatModule, RbacModule, AnalyticsModule,
+    EvalModule,  // 导入 EvalModule 以启用 CLI 命令
   ],
   providers: [
     { provide: 'APP_GUARD', useClass: PermissionGuard },

@@ -4,7 +4,6 @@ import { Repository } from 'typeorm';
 
 import { RAGService } from '../rag/rag.service';
 import { MemoryService } from '../memory/memory.service';
-import { LangfuseService } from '../../common/observability/langfuse.service';
 import { TtsService } from './services/tts.service';
 import { VoiceGateway } from './voice.gateway';
 import { Conversation } from './entities/conversation.entity';
@@ -18,14 +17,13 @@ export class ChatService {
   constructor(
     private rag: RAGService,
     public memory: MemoryService,
-    private langfuse: LangfuseService,
     private tts: TtsService,
     private voiceGateway: VoiceGateway,
     @InjectRepository(Conversation) private convRepo: Repository<Conversation>,
     @InjectRepository(Message) private msgRepo: Repository<Message>,
   ) {}
 
-  async *streamAnswer(message: string, userId: string, sessionId: string, conversationId?: string) {
+  async *streamAnswer(message: string, userId: string, sessionId: string, conversationId?: string, evalMetadata?: any) {
     // 检测"记住xxx"模式 → 写入 Mem0 明确记忆
     if (/^(记住|请记住|帮我记住)/.test(message)) {
       const fact = message.replace(/^(记住|请记住|帮我记住)[，,：:\s]*/, '');
@@ -58,15 +56,12 @@ export class ChatService {
     // 先发送对话 ID 事件，前端据此绑定消息归属
     yield { type: 'conversation', conversationId: resolvedConvId, isNew: isNewConv };
 
-    // 流式 RAG 回答
-    const traceId = this.langfuse.createTrace('chat', { query: message }, userId, sessionId);
-    const stream = await this.rag.streamQuery(message, userId, sessionId, traceId || undefined);
+    const stream = await this.rag.streamQuery(message, userId, sessionId, resolvedConvId);
     let fullAnswer = '';
     let sourcesData: any[] | null = null;
 
-    try {
-      /** 从文本中提取 SOURCES 标记，返回 { sources, cleanText } */
-      const extractSources = (text: string): { sources?: any[]; cleanText: string } => {
+    /** 从文本中提取 SOURCES 标记，返回 { sources, cleanText } */
+    const extractSources = (text: string): { sources?: any[]; cleanText: string } => {
       const match = text.match(/<!-- SOURCES:(.*?)-->/);
       if (!match) return { cleanText: text };
       try {
@@ -217,13 +212,6 @@ export class ChatService {
       await this.saveMessage(resolvedConvId, 'assistant', fullAnswer, sourcesData || undefined).catch((err) => {
         this.logger.warn('持久化助手消息失败', (err as Error)?.message);
       });
-    }
-
-    } finally {
-      // flush LangFuse 上报（异常退出时也确保 flush）
-      if (traceId) {
-        await this.langfuse.flush();
-      }
     }
   }
 

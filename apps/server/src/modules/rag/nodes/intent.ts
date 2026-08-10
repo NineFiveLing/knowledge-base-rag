@@ -2,7 +2,6 @@ import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { AgentStateType } from '../state';
 import { MemoryService } from '../../memory/memory.service';
-import { LangfuseService } from '../../../common/observability/langfuse.service';
 import { Logger } from '@nestjs/common';
 
 const logger = new Logger('RAG:IntentClassifier');
@@ -40,7 +39,7 @@ function detectFollowUp(message: string, history: Array<{ role: string; content:
 }
 
 /** 创建意图分类节点 */
-export function createIntentClassifier(llm: ChatOpenAI, memory: MemoryService, langfuse?: LangfuseService) {
+export function createIntentClassifier(llm: ChatOpenAI, memory: MemoryService) {
   return async function classifyIntent(state: AgentStateType): Promise<Partial<AgentStateType>> {
     const startTime = Date.now();
     const lastMsg = state.messages[state.messages.length - 1];
@@ -67,12 +66,6 @@ export function createIntentClassifier(llm: ChatOpenAI, memory: MemoryService, l
       const res = await llm.invoke([new SystemMessage(INTENT_PROMPT), new HumanMessage(content)]);
       const raw = String(res.content).trim().toLowerCase();
       intent = ['chat', 'simple', 'complex'].includes(raw) ? raw : 'simple';
-    }
-
-    // 记录 LangFuse span
-    if (langfuse?.isEnabled() && state.langfuseTraceId) {
-      const span = langfuse.createSpan(state.langfuseTraceId, 'intent_classifier', { query: content });
-      langfuse.endSpan(span, { intent, latencyMs: Date.now() - startTime });
     }
 
     logger.log(`📌 [intent_classifier] 进入 → 意图="${intent}" query="${content.slice(0, 60)}" historyMsgs=${historyMessages.length} latency=${Date.now() - startTime}ms`);

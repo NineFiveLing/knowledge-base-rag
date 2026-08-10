@@ -1,9 +1,10 @@
-import { Global, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { LangfuseService } from './langfuse.service';
 
-/** 可观测性模块：全局模块，提供 LangfuseService */
-@Global()
+/** 可观测性模块：LangFuse 追踪服务 */
 @Module({
+  imports: [ConfigModule],
   providers: [LangfuseService],
   exports: [LangfuseService],
 })

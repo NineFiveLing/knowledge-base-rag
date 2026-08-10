@@ -5,7 +5,6 @@ import { Neo4jService } from '../../database/neo4j/neo4j.service';
 import { RedisService } from '../../database/redis/redis.service';
 import { reciprocalRankFusion, ScoredResult } from './fusion/rrf';
 import { rerank } from './fusion/reranker';
-import { LangfuseService } from '../../common/observability/langfuse.service';
 
 /** 混合检索选项 */
 interface SearchOptions {
@@ -45,7 +44,6 @@ export class SearchService {
     private es: ElasticsearchService,
     private neo4j: Neo4jService,
     private redis: RedisService,
-    private langfuse?: LangfuseService,
   ) {}
 
   /** 多路混合检索 */

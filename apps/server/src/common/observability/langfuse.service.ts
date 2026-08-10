@@ -1,101 +1,104 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { Langfuse } from 'langfuse';
+import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { LangfuseAPIClient } from '@langfuse/core';
+import { CallbackHandler } from '@langfuse/langchain';
 
-/**
- * LangFuse 可观测性服务
- * 内部维护 activeTraces Map，允许节点通过 traceId（字符串）查找 trace 并创建 span
- */
+/** LangFuse 可观测性服务：管理 Client 生命周期，提供带标签的 CallbackHandler */
 @Injectable()
-export class LangfuseService implements OnModuleInit, OnModuleDestroy {
-  private client!: Langfuse;
-  /** 活跃 trace 缓存，key 为 traceId */
-  private activeTraces = new Map<string, any>();
+export class LangfuseService implements OnModuleInit {
+  private readonly logger = new Logger(LangfuseService.name);
+  private langfuseClient: LangfuseAPIClient | null = null;
+  private initialized = false;
 
-  constructor(private config: ConfigService) {}
+  constructor(private config: ConfigService) {
+    this.initClient();
+  }
 
   onModuleInit() {
-    const publicKey = this.config.get('LANGFUSE_PUBLIC_KEY');
-    const secretKey = this.config.get('LANGFUSE_SECRET_KEY');
-    if (!publicKey || !secretKey) {
-      console.warn('[LangFuse] 未配置密钥，可观测性功能禁用');
+    // 双重保障：生产环境生命周期钩子
+    this.initClient();
+  }
+
+  private initClient() {
+    const publicKey = this.config.get<string>('LANGFUSE_PUBLIC_KEY');
+    const secretKey = this.config.get<string>('LANGFUSE_SECRET_KEY');
+    const baseUrl = this.config.get<string>('LANGFUSE_BASE_URL');
+
+    if (!publicKey || publicKey.trim() === '') {
+      this.logger.warn('LangFuse not initialized: LANGFUSE_PUBLIC_KEY is empty. Tracing disabled.');
       return;
     }
-    this.client = new Langfuse({
-      publicKey,
-      secretKey,
-      baseUrl: this.config.get('LANGFUSE_HOST') || 'https://cloud.langfuse.com',
+
+    if (!secretKey || secretKey.trim() === '') {
+      this.logger.warn('LangFuse not initialized: LANGFUSE_SECRET_KEY is empty. Tracing disabled.');
+      return;
+    }
+
+    try {
+      this.langfuseClient = new LangfuseAPIClient({
+        environment: () => process.env.NODE_ENV || 'development',
+        baseUrl: baseUrl ? () => baseUrl : undefined,
+        username: () => publicKey,
+        password: () => secretKey,
+      });
+      this.initialized = true;
+      this.logger.log(`LangFuse initialized: baseUrl=${baseUrl || 'https://cloud.langfuse.com'}`);
+    } catch (error) {
+      this.logger.error(`LangFuse initialization failed: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * 获取带用户标签的 CallbackHandler
+   * @param opts 用户上下文信息
+   * @returns CallbackHandler 实例，未初始化时返回 null
+   */
+  getCallbackHandler(opts: {
+    userId: string;
+    sessionId: string;
+    conversationId?: string;
+  }): CallbackHandler | null {
+    if (!this.initialized) {
+      return null;
+    }
+
+    const tags: string[] = [
+      `userId:${opts.userId}`,
+      `sessionId:${opts.sessionId}`,
+    ];
+
+    if (opts.conversationId) {
+      tags.push(`conversationId:${opts.conversationId}`);
+    }
+
+    const metadata: Record<string, unknown> = {
+      userId: opts.userId,
+      sessionId: opts.sessionId,
+    };
+    if (opts.conversationId) {
+      metadata.conversationId = opts.conversationId;
+    }
+
+    return new CallbackHandler({
+      userId: opts.userId,
+      sessionId: opts.sessionId,
+      tags,
+      traceMetadata: metadata,
     });
   }
 
-  async onModuleDestroy() {
-    if (this.client) {
-      await this.client.shutdownAsync();
-    }
+  /**
+   * 获取 LangFuse Client 实例（用于评测等高级用法）
+   * @returns LangFuse 客户端实例，未初始化时返回 null
+   */
+  getClient(): LangfuseAPIClient | null {
+    return this.langfuseClient;
   }
 
-  /** 判断 LangFuse 是否已配置 */
-  isEnabled(): boolean {
-    return !!this.client;
-  }
-
-  /** 创建顶层 trace 并返回其 ID（字符串，可安全存入 LangGraph state） */
-  createTrace(name: string, input?: any, userId?: string, sessionId?: string): string | null {
-    if (!this.client) return null;
-    const trace = this.client.trace({ name, input, userId, sessionId });
-    const traceId = trace.id || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    this.activeTraces.set(traceId, trace);
-    return traceId;
-  }
-
-  /** 根据 traceId 获取 trace 对象 */
-  getTrace(traceId: string): any | null {
-    return this.activeTraces.get(traceId) || null;
-  }
-
-  /** 在指定 trace 下创建 span */
-  createSpan(traceId: string, name: string, input?: any): any | null {
-    const trace = this.getTrace(traceId);
-    if (!trace) return null;
-    return trace.span({ name, input: input ?? undefined });
-  }
-
-  /** 结束 span */
-  endSpan(span: any, output?: any): void {
-    if (!span) return;
-    if (output !== undefined) {
-      span.update({ output });
-    }
-    span.end();
-  }
-
-  /** 记录 LLM generation */
-  recordGeneration(traceId: string, data: {
-    name: string;
-    input: any;
-    output: any;
-    model?: string;
-    usage?: { promptTokens?: number; completionTokens?: number };
-  }): void {
-    if (!this.client) return;
-    const trace = this.getTrace(traceId);
-    if (!trace) return;
-    const gen = trace.generation({
-      name: data.name,
-      input: data.input,
-      output: data.output,
-      model: data.model,
-      usage: data.usage,
-    });
-    gen.end();
-  }
-
-  /** 手动 flush，确保数据上报，并清理已上报的 trace 防止内存泄漏 */
-  async flush(): Promise<void> {
-    if (this.client) {
-      await this.client.flushAsync();
-    }
-    // 清理已上报的 trace，防止内存泄漏
-    this.activeTraces.clear();
+  /**
+   * 优雅关闭（v5 CallbackHandler 自行管理连接，此处为生命周期占位）
+   */
+  async shutdown() {
+    this.logger.log('LangFuse shutdown requested (v5 CallbackHandler manages connections lazily)');
   }
 }

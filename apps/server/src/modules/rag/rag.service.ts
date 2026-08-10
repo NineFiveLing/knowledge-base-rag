@@ -17,9 +17,10 @@ import {
 } from "./tools";
 import { SearchService } from "../search/search.service";
 import { MemoryService } from "../memory/memory.service";
-import { LangfuseService } from "../../common/observability/langfuse.service";
 import { Document } from "../document/entities/document.entity";
 import { withLLMRetry } from "../../common/utils/retry.util";
+import { LangfuseService } from "../../common/observability/langfuse.service";
+import { CallbackHandler } from "@langfuse/langchain";
 
 /** RAG 服务：组装完整的 LangGraph Agentic RAG 工作流 */
 @Injectable()
@@ -33,8 +34,8 @@ export class RAGService implements OnModuleInit {
     private config: ConfigService,
     private search: SearchService,
     private memory: MemoryService,
-    private langfuse: LangfuseService,
     @InjectRepository(Document) private docRepo: Repository<Document>,
+    private langfuseService: LangfuseService,
   ) {
     const apiKey = config.get("ALIYUN_API_KEY");
     const baseURL = config.get("ALIYUN_BASE_URL");
@@ -84,18 +85,16 @@ export class RAGService implements OnModuleInit {
       this.llm,
       [vectorTool, esTool, neo4jTool],
       this.memory,
-      this.langfuse,
     );
 
     this.graph = createRAGGraph(
-      createIntentClassifier(this.llm, this.memory, this.langfuse),
+      createIntentClassifier(this.llm, this.memory),
       this.directAnswer.bind(this),
       this.simpleRetrieval.bind(this),
       createAgentNode(
         this.llm,
         [vectorTool, esTool, neo4jTool],
         this.memory,
-        this.langfuse,
       ),
       agentFollowUpNode,
       createRetrievalNode(
@@ -122,9 +121,8 @@ export class RAGService implements OnModuleInit {
               .hybridSearch(q, [], undefined, { useES: false, useNeo4j: true })
               .then((r) => r.slice(0, 5)),
           ),
-        this.langfuse,
       ),
-      createGenerateNode(this.llm, this.memory, this.langfuse, this.docRepo),
+      createGenerateNode(this.llm, this.memory, this.docRepo),
       routeByIntent,
       decideNext,
     );
@@ -140,6 +138,7 @@ export class RAGService implements OnModuleInit {
   private async simpleRetrieval(state: any) {
     const userMsg = state.messages[state.messages.length - 1];
     const query = typeof userMsg.content === "string" ? userMsg.content : "";
+    const startTime = Date.now();
     this.logger.log(`📌 [simple_retrieval] 进入 | query="${query.slice(0, 60)}"`);
 
     const emb = await this.embed(query);
@@ -150,8 +149,10 @@ export class RAGService implements OnModuleInit {
       { useES: false, useNeo4j: false },
     );
 
+    const latencyMs = Date.now() - startTime;
+
     this.logger.log(
-      `📌 [simple_retrieval] 完成 | 检索结果=${result.results.length}条 degraded=${result.degraded}`,
+      `📌 [simple_retrieval] 完成 | 检索结果=${result.results.length}条 degraded=${result.degraded} latency=${latencyMs}ms`,
     );
 
     // 将完整 SearchResult 结构写入 state，保留 degraded/fallbackMessage
@@ -169,13 +170,31 @@ export class RAGService implements OnModuleInit {
   }
 
   /** 同步问答 */
-  async query(userMessage: string, userId: string, sessionId: string) {
-    const result = await this.graph.invoke({
-      messages: [new HumanMessage(userMessage)],
+  async query(
+    userMessage: string,
+    userId: string,
+    sessionId: string,
+    extraCallbacks?: CallbackHandler[],
+  ): Promise<{ answer: string; traceId?: string }> {
+    const langfuseHandler = this.langfuseService.getCallbackHandler({
       userId,
       sessionId,
     });
-    return result.finalAnswer;
+
+    const callbacks = [...(extraCallbacks || [])];
+    if (langfuseHandler) {
+      callbacks.push(langfuseHandler);
+    }
+
+    const result = await this.graph.invoke(
+      { messages: [new HumanMessage(userMessage)], userId, sessionId },
+      { callbacks: callbacks.length > 0 ? callbacks : [] },
+    );
+
+    // 从外部传入的 handler 中获取 traceId（用于评测实验关联）
+    const traceId = extraCallbacks?.[0]?.last_trace_id || undefined;
+
+    return { answer: result.finalAnswer, traceId };
   }
 
   /** 流式问答 */
@@ -183,16 +202,24 @@ export class RAGService implements OnModuleInit {
     userMessage: string,
     userId: string,
     sessionId: string,
-    langfuseTraceId?: string,
+    conversationId?: string,
   ) {
+    const langfuseHandler = this.langfuseService.getCallbackHandler({
+      userId,
+      sessionId,
+      conversationId,
+    });
+
     return this.graph.streamEvents(
       {
         messages: [new HumanMessage(userMessage)],
         userId,
         sessionId,
-        langfuseTraceId: langfuseTraceId || "",
       },
-      { version: "v2" },
+      {
+        version: "v2",
+        callbacks: langfuseHandler ? [langfuseHandler] : [],
+      },
     );
   }
 

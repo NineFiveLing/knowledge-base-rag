@@ -173,31 +173,6 @@ export class RAGService implements OnModuleInit {
     };
   }
 
-  /** 同步问答 */
-  async query(
-    userMessage: string,
-    userId: string,
-    sessionId: string,
-    extraCallbacks?: CallbackHandler[],
-  ): Promise<{ answer: string; traceId?: string }> {
-    const langfuseHandler = this.createLangfuseHandler({ userId, sessionId });
-
-    const callbacks = [...(extraCallbacks || [])];
-    if (langfuseHandler) {
-      callbacks.push(langfuseHandler);
-    }
-
-    const result = await this.graph.invoke(
-      { messages: [new HumanMessage(userMessage)], userId, sessionId },
-      { callbacks: callbacks.length > 0 ? callbacks : [] },
-    );
-
-    // 从外部传入的 handler 中获取 traceId（用于评测实验关联）
-    const traceId = extraCallbacks?.[0]?.last_trace_id || undefined;
-
-    return { answer: result.finalAnswer, traceId };
-  }
-
   /** 评测专用：跑一次 RAG，额外返回检索上下文（供忠实度/可信度评分），并剥离 SOURCES 标签 */
   async queryWithContext(
     userMessage: string,

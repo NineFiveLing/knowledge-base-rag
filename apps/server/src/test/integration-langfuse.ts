@@ -201,7 +201,7 @@ async function testTraceGeneration() {
   console.log('\n📌 Test 6: Trace 追踪架构说明');
 
   console.log('  ⚠️  LangfuseAPIClient 是数据集和评分管理 API');
-  console.log('  ℹ️  追踪功能需要使用 @langfuse/tracing 或 @langfuse/langchain');
+  console.log('  ℹ️  追踪功能需要使用 @langfuse/langchain');
   console.log('');
   console.log('  本项目已集成 @langfuse/langchain CallbackHandler');
   console.log('  用于追踪 RAG pipeline 的 LLM 调用和链执行');

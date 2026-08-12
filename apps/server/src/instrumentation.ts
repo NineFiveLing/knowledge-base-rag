@@ -1,54 +1,31 @@
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { Resource } from '@opentelemetry/resources';
-import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
-
-// 自动插桩注册表
-import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
-import { PgInstrumentation } from '@opentelemetry/instrumentation-pg';
-import { MongoDBInstrumentation } from '@opentelemetry/instrumentation-mongodb';
-import { IORedisInstrumentation } from '@opentelemetry/instrumentation-ioredis';
-// 注：Elasticsearch 无官方 OTel instrumentation 包，使用客户端内置诊断
-
-let sdk: NodeSDK | null = null;
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+import { LangfuseSpanProcessor } from "@langfuse/otel";
 
 /**
- * 注册 OpenTelemetry 自动插桩
- * 当 OTEL_EXPORTER_OTLP_ENDPOINT 未设置时，跳过初始化
+ * OpenTelemetry 自动插桩（LangfuseSpanProcessor 导出）
+ * 未配置 LANGFUSE_PUBLIC_KEY 时优雅降级（不启动 SDK，不抛异常）
  */
-export function registerOTel(): NodeSDK | null {
-  // 如果已注册，直接返回
-  if (sdk) {
-    return sdk;
-  }
-
-  const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
-  if (!endpoint || endpoint.trim() === '') {
-    return null;
-  }
-
-  const serviceName = process.env.OTEL_SERVICE_NAME || 'knowledge-base-rag-server';
-  const environment = process.env.OTEL_ENVIRONMENT || 'development';
-
-  sdk = new NodeSDK({
-    resource: new Resource({
-      [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
-      [SemanticResourceAttributes.SERVICE_NAMESPACE]: 'knowledge-base-rag',
-      [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: environment,
-    }),
-    traceExporter: new OTLPTraceExporter({
-      url: endpoint,
-    }),
-    instrumentations: [
-      new ExpressInstrumentation(),
-      new PgInstrumentation(),
-      new MongoDBInstrumentation(),
-      new IORedisInstrumentation(),
-      // Elasticsearch: 无官方 OTel instrumentation 包，跳过
-    ],
+let sdk: NodeSDK | null = null;
+const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
+if (publicKey && publicKey.trim() !== "") {
+  const langfuseSpanProcessor = new LangfuseSpanProcessor({
+    publicKey,
+    secretKey: process.env.LANGFUSE_SECRET_KEY,
+    baseUrl: process.env.LANGFUSE_BASE_URL || "https://cloud.langfuse.com",
+    environment: process.env.NODE_ENV || "development",
   });
-
+  sdk = new NodeSDK({
+    spanProcessors: [langfuseSpanProcessor],
+    instrumentations: [getNodeAutoInstrumentations()],
+  });
   sdk.start();
+}
+
+/**
+ * 获取当前 OTel SDK 实例（测试钩子；未初始化时为 null）
+ */
+export function getOTelSdk(): NodeSDK | null {
   return sdk;
 }
 

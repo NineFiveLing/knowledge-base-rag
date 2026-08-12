@@ -164,7 +164,7 @@ describe('LangfuseEvalService', () => {
       };
 
       mockLangfuseService.getClient.mockReturnValue(mockClient as any);
-      mockRagService.query.mockResolvedValue('generated answer');
+      mockRagService.query.mockResolvedValue({ answer: 'generated answer' });
 
       const result = await service.runEvaluation('dataset-123');
 
@@ -198,7 +198,7 @@ describe('LangfuseEvalService', () => {
       };
 
       mockLangfuseService.getClient.mockReturnValue(mockClient as any);
-      mockRagService.query.mockResolvedValue('generated answer');
+      mockRagService.query.mockResolvedValue({ answer: 'generated answer' });
 
       const result = await service.runEvaluationWithProgress('dataset-123', { batchSize: 2 });
 
@@ -232,16 +232,16 @@ describe('LangfuseEvalService', () => {
 
       mockLangfuseService.getClient.mockReturnValue(mockClient as any);
       mockRagService.query
-        .mockResolvedValueOnce('answer 1')
+        .mockResolvedValueOnce({ answer: 'answer 1' })
         .mockRejectedValueOnce(new Error('API 限流'))
-        .mockResolvedValueOnce('answer 3');
+        .mockResolvedValueOnce({ answer: 'answer 3' });
 
       const result = await service.runEvaluationWithProgress('dataset-123', { batchSize: 10 });
 
       expect(mockRagService.query).toHaveBeenCalledTimes(3);
       expect(result.evaluatedCount).toBe(3); // 3 条用例都处理了
       expect(result.scores[0].scores.length).toBeGreaterThan(0); // item-1 有评分
-      expect(result.scores[1].scores.length).toBe(0); // item-2 失败，无评分
+      expect(result.scores[1].scores.length).toBeGreaterThan(0); // item-2 RAG 失败但落入兜底文本继续评分（不跳过）
       expect(result.scores[2].scores.length).toBeGreaterThan(0); // item-3 有评分
     });
 

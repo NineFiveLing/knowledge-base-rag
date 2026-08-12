@@ -21,6 +21,12 @@ import { Document } from "../document/entities/document.entity";
 import { withLLMRetry } from "../../common/utils/retry.util";
 import { CallbackHandler } from "@langfuse/langchain";
 
+/** 剥离 finalAnswer 末尾的 <!-- SOURCES:... --> 标签 */
+function stripSourcesTag(text: string): string {
+  const idx = text.indexOf("<!-- SOURCES:");
+  return idx >= 0 ? text.slice(0, idx).trim() : text;
+}
+
 /** RAG 服务：组装完整的 LangGraph Agentic RAG 工作流 */
 @Injectable()
 export class RAGService implements OnModuleInit {
@@ -190,6 +196,33 @@ export class RAGService implements OnModuleInit {
     const traceId = extraCallbacks?.[0]?.last_trace_id || undefined;
 
     return { answer: result.finalAnswer, traceId };
+  }
+
+  /** 评测专用：跑一次 RAG，额外返回检索上下文（供忠实度/可信度评分），并剥离 SOURCES 标签 */
+  async queryWithContext(
+    userMessage: string,
+    userId: string,
+    sessionId: string,
+    extraCallbacks?: CallbackHandler[],
+  ): Promise<{ answer: string; retrievedChunks: string[]; traceId?: string }> {
+    const langfuseHandler = this.createLangfuseHandler({ userId, sessionId });
+
+    const callbacks = [...(extraCallbacks || [])];
+    if (langfuseHandler) {
+      callbacks.push(langfuseHandler);
+    }
+
+    const result = await this.graph.invoke(
+      { messages: [new HumanMessage(userMessage)], userId, sessionId },
+      { callbacks: callbacks.length > 0 ? callbacks : [] },
+    );
+
+    const traceId = extraCallbacks?.[0]?.last_trace_id || undefined;
+    return {
+      answer: stripSourcesTag(result.finalAnswer),
+      retrievedChunks: (result.retrievedChunks || []).map((c: any) => c.chunk_text),
+      traceId,
+    };
   }
 
   /** 流式问答 */

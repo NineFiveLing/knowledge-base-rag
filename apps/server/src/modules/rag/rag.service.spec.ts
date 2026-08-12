@@ -90,4 +90,52 @@ describe('RAGService - CallbackHandler Integration', () => {
       expect(handler).toBeNull();
     });
   });
+
+  describe('queryWithContext', () => {
+    it('应返回剥离 SOURCES 标签的答案与检索上下文', async () => {
+      const mockInvoke = jest.fn().mockResolvedValue({
+        finalAnswer: '年假通过OA系统申请。\n<!-- SOURCES:[{"index":1}] -->',
+        retrievedChunks: [
+          { chunk_text: '员工可通过OA系统提交年假申请', score: 0.9 },
+          { chunk_text: '提前3个工作日提交', score: 0.8 },
+        ],
+      });
+      (service as any).graph = { invoke: mockInvoke };
+
+      const result = await service.queryWithContext('年假怎么申请？', 'user-1', 'session-1');
+
+      expect(result.answer).toBe('年假通过OA系统申请。');
+      expect(result.retrievedChunks).toEqual([
+        '员工可通过OA系统提交年假申请',
+        '提前3个工作日提交',
+      ]);
+      expect(mockInvoke).toHaveBeenCalled();
+    });
+
+    it('无 SOURCES 标签时原样返回答案', async () => {
+      const mockInvoke = jest.fn().mockResolvedValue({
+        finalAnswer: '直接回答',
+        retrievedChunks: [],
+      });
+      (service as any).graph = { invoke: mockInvoke };
+
+      const result = await service.queryWithContext('你好', 'user-1', 'session-1');
+
+      expect(result.answer).toBe('直接回答');
+      expect(result.retrievedChunks).toEqual([]);
+    });
+
+    it('应透传外部 CallbackHandler 的 traceId', async () => {
+      const mockInvoke = jest.fn().mockResolvedValue({
+        finalAnswer: '回答',
+        retrievedChunks: [],
+      });
+      (service as any).graph = { invoke: mockInvoke };
+      const fakeHandler = { last_trace_id: 'trace-abc' } as any;
+
+      const result = await service.queryWithContext('Q', 'user-1', 'session-1', [fakeHandler]);
+
+      expect(result.traceId).toBe('trace-abc');
+    });
+  });
 });

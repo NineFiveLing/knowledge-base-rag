@@ -3,12 +3,14 @@ import { LangfuseEvalService } from './langfuse-eval.service';
 import { LangfuseService } from '../../common/observability/langfuse.service';
 import { RAGService } from './rag.service';
 import { ExcelParserService } from '../eval/excel-parser.service';
+import { EvalScorerService } from '../eval/eval-scorer.service';
 
 describe('LangfuseEvalService', () => {
   let service: LangfuseEvalService;
   let mockLangfuseService: jest.Mocked<LangfuseService>;
   let mockRagService: jest.Mocked<RAGService>;
   let mockExcelParser: jest.Mocked<ExcelParserService>;
+  let mockEvalScorer = { score: jest.fn() } as any;
 
   beforeEach(async () => {
     process.env.LANGFUSE_PUBLIC_KEY = 'test-public-key';
@@ -22,11 +24,15 @@ describe('LangfuseEvalService', () => {
     } as any;
 
     mockRagService = {
-      query: jest.fn().mockResolvedValue({ answer: 'test answer' }),
+      queryWithContext: jest.fn(),
     } as any;
 
     mockExcelParser = {
       parse: jest.fn(),
+    } as any;
+
+    mockEvalScorer = {
+      score: jest.fn(),
     } as any;
 
     const module: TestingModule = await Test.createTestingModule({
@@ -35,6 +41,7 @@ describe('LangfuseEvalService', () => {
         { provide: LangfuseService, useValue: mockLangfuseService },
         { provide: RAGService, useValue: mockRagService },
         { provide: ExcelParserService, useValue: mockExcelParser },
+        { provide: EvalScorerService, useValue: mockEvalScorer },
       ],
     }).compile();
 
@@ -84,6 +91,7 @@ describe('LangfuseEvalService', () => {
           { provide: LangfuseService, useValue: mockLangfuseService },
           { provide: RAGService, useValue: mockRagService },
           { provide: ExcelParserService, useValue: mockExcelParser },
+          { provide: EvalScorerService, useValue: mockEvalScorer },
         ],
       }).compile();
       const newService = module.get<LangfuseEvalService>(LangfuseEvalService);
@@ -140,39 +148,6 @@ describe('LangfuseEvalService', () => {
     });
   });
 
-  describe('runEvaluation', () => {
-    it('should execute RAG pipeline for each test case and score results', async () => {
-      const mockClient = {
-        datasets: {
-          list: jest.fn().mockResolvedValue({
-            data: [{ id: 'dataset-123', name: 'test-dataset' }],
-          }),
-          getRuns: jest.fn().mockResolvedValue({ data: [] }),
-        },
-        datasetItems: {
-          list: jest.fn().mockResolvedValue({
-            data: [
-              { id: 'item-1', input: { question: 'Q1' }, expectedOutput: { answer: 'A1' } },
-              { id: 'item-2', input: { question: 'Q2' }, expectedOutput: { answer: 'A2' } },
-            ],
-          }),
-        },
-        scores: {
-          create: jest.fn().mockResolvedValue({ id: 'score-1' }),
-        },
-      };
-
-      mockLangfuseService.getClient.mockReturnValue(mockClient as any);
-      mockRagService.query.mockResolvedValue({ answer: 'generated answer' });
-
-      const result = await service.runEvaluation('dataset-123');
-
-      expect(mockRagService.query).toHaveBeenCalledTimes(2);
-      expect(mockClient.scores.create).toHaveBeenCalled();
-      expect(result.evaluatedCount).toBe(2);
-    });
-  });
-
   describe('runEvaluationWithProgress', () => {
     it('应该分批执行评测并返回评分结果', async () => {
       const mockClient = {
@@ -191,18 +166,39 @@ describe('LangfuseEvalService', () => {
             ],
           }),
         },
+        datasetRunItems: {
+          create: jest.fn().mockResolvedValue({ id: 'run-item-1', datasetRunId: 'run-1' }),
+        },
         scores: {
           create: jest.fn().mockResolvedValue({ id: 'score-1' }),
         },
       };
 
       mockLangfuseService.getClient.mockReturnValue(mockClient as any);
-      mockRagService.query.mockResolvedValue({ answer: 'generated answer' });
+      mockRagService.queryWithContext.mockResolvedValue({
+        answer: 'generated answer',
+        retrievedChunks: ['上下文1', '上下文2'],
+        traceId: 'trace-1',
+      });
+      mockEvalScorer.score.mockResolvedValue({
+        relevancy: { name: 'relevancy', value: 0.9, reason: '切题', missingPoints: [] },
+        faithfulness: { name: 'faithfulness', value: 0.8, reason: '有据', missingPoints: [] },
+        credibility: { name: 'credibility', value: 0.7, reason: '覆盖关键点', missingPoints: ['未提及报销比例'] },
+      });
 
       const result = await service.runEvaluationWithProgress('dataset-123', { batchSize: 2 });
 
-      expect(mockRagService.query).toHaveBeenCalledTimes(3);
-      expect(mockClient.scores.create).toHaveBeenCalled();
+      expect(mockRagService.queryWithContext).toHaveBeenCalledTimes(3);
+      expect(mockEvalScorer.score).toHaveBeenCalledTimes(3);
+      expect(mockClient.datasetRunItems.create).toHaveBeenCalledTimes(3);
+      expect(mockClient.scores.create).toHaveBeenCalledTimes(9); // 3 用例 × 3 维度
+      expect(mockClient.scores.create).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'credibility',
+        value: 0.7,
+        datasetRunId: 'run-1',
+        comment: '覆盖关键点',
+        metadata: { missingPoints: ['未提及报销比例'] },
+      }));
       expect(result.evaluatedCount).toBe(3);
       expect(result.scores).toHaveLength(3);
     });
@@ -224,24 +220,42 @@ describe('LangfuseEvalService', () => {
             ],
           }),
         },
+        datasetRunItems: {
+          create: jest.fn().mockResolvedValue({ id: 'run-item-1', datasetRunId: 'run-1' }),
+        },
         scores: {
           create: jest.fn().mockResolvedValue({ id: 'score-1' }),
         },
       };
 
       mockLangfuseService.getClient.mockReturnValue(mockClient as any);
-      mockRagService.query
-        .mockResolvedValueOnce({ answer: 'answer 1' })
+      mockRagService.queryWithContext
+        .mockResolvedValueOnce({ answer: 'answer 1', retrievedChunks: [], traceId: 'trace-1' })
         .mockRejectedValueOnce(new Error('API 限流'))
-        .mockResolvedValueOnce({ answer: 'answer 3' });
+        .mockResolvedValueOnce({ answer: 'answer 3', retrievedChunks: [], traceId: 'trace-3' });
+      mockEvalScorer.score.mockResolvedValue({
+        relevancy: { name: 'relevancy', value: 0.9, reason: '切题', missingPoints: [] },
+        faithfulness: { name: 'faithfulness', value: 0.8, reason: '有据', missingPoints: [] },
+        credibility: { name: 'credibility', value: 0.7, reason: '覆盖关键点', missingPoints: ['未提及报销比例'] },
+      });
 
       const result = await service.runEvaluationWithProgress('dataset-123', { batchSize: 10 });
 
-      expect(mockRagService.query).toHaveBeenCalledTimes(3);
+      expect(mockRagService.queryWithContext).toHaveBeenCalledTimes(3);
       expect(result.evaluatedCount).toBe(3); // 3 条用例都处理了
       expect(result.scores[0].scores.length).toBeGreaterThan(0); // item-1 有评分
       expect(result.scores[1].scores.length).toBeGreaterThan(0); // item-2 RAG 失败但落入兜底文本继续评分（不跳过）
       expect(result.scores[2].scores.length).toBeGreaterThan(0); // item-3 有评分
+
+      // 失败路径断言：item-2 RAG 失败无 traceId，跳过 run 关联；评分与 score 推送不受影响
+      expect(mockClient.datasetRunItems.create).toHaveBeenCalledTimes(2); // 仅 item-1、item-3 关联 run
+      expect(mockClient.scores.create).toHaveBeenCalledTimes(9); // 3 项 × 3 维度，含失败项 3 维
+      expect(mockClient.scores.create).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 'eval-dataset-123-item-2', // 失败项走 sessionId 回退分支
+      }));
+      expect(mockClient.scores.create).toHaveBeenCalledWith(expect.objectContaining({
+        datasetRunId: 'run-1', // 成功项仍走 datasetRunId 分支
+      }));
     });
 
     it('应该在未初始化 LangFuse 时抛出错误', async () => {

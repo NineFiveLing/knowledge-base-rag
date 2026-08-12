@@ -3,6 +3,7 @@ import { LangfuseService } from '../../common/observability/langfuse.service';
 import { RAGService } from './rag.service';
 import { ExcelParserService } from '../eval/excel-parser.service';
 import { ParsedTestCase } from '../eval/excel-parser.service';
+import { EvalScorerService } from '../eval/eval-scorer.service';
 import { CallbackHandler } from '@langfuse/langchain';
 
 export interface TestCase {
@@ -35,6 +36,7 @@ export class LangfuseEvalService {
     private langfuseService: LangfuseService,
     private ragService: RAGService,
     private excelParser: ExcelParserService,
+    private evalScorer: EvalScorerService,
   ) {}
 
   /**
@@ -171,13 +173,12 @@ export class LangfuseEvalService {
         const item = batch[j];
         const index = i + j + 1;
         const question = (item.input as any)?.question || '';
-        const expectedAnswer = (item.expectedOutput as any)?.answer || '';
+        const groundTruth = (item.expectedOutput as any)?.answer || '';
 
         try {
-          // 先跑 RAG 拿到答案，再创建 trace 并填入 input/output，避免 input/output 为空
-          let generatedAnswer = '';
+          // 1. 跑 RAG（带 evalHandler 产生 trace）
           const evalHandler = new CallbackHandler({
-            userId: `eval-user`,
+            userId: 'eval-user',
             sessionId: `eval-${resolvedDatasetId}-${item.id}`,
             tags: [`datasetId:${resolvedDatasetId}`, `datasetItemId:${item.id}`],
             traceMetadata: {
@@ -188,123 +189,85 @@ export class LangfuseEvalService {
             },
           });
 
+          let generatedAnswer = '';
+          let retrievedChunks: string[] = [];
+          let queryTraceId: string | undefined;
           try {
-            const queryResult = await this.ragService.query(
+            const result = await this.ragService.queryWithContext(
               question,
-              `eval-user`,
+              'eval-user',
               `eval-${resolvedDatasetId}-${item.id}`,
               [evalHandler],
             );
-            generatedAnswer = queryResult.answer;
+            generatedAnswer = result.answer;
+            retrievedChunks = result.retrievedChunks;
+            queryTraceId = result.traceId;
           } catch (ragError: any) {
             this.logger.warn(`RAG 执行失败 [${index}]: ${ragError.message}`);
             generatedAnswer = `[RAG Error] ${ragError.message.slice(0, 200)}`;
           }
 
-          // 使用 ingestion.batch() 创建 eval trace，并写入 input/output
-          let evalTraceId: string | undefined;
-          try {
-            const traceEventId = crypto.randomUUID();
-            evalTraceId = crypto.randomUUID();
-            await (client as any).ingestion.batch({
-              batch: [
-                {
-                  type: "trace-create",
-                  id: traceEventId,
-                  timestamp: new Date().toISOString(),
-                  body: {
-                    id: evalTraceId,
-                    name: `eval-${item.id.slice(0, 8)}`,
-                    userId: `eval-user`,
-                    sessionId: `eval-${resolvedDatasetId}-${item.id}`,
-                    input: question || null,
-                    output: generatedAnswer || null,
-                    tags: [`datasetId:${resolvedDatasetId}`, `datasetItemId:${item.id}`, `eval-run`],
-                    metadata: {
-                      datasetId: resolvedDatasetId,
-                      datasetItemId: item.id,
-                      datasetName: targetDataset!.name,
-                      evalRun: true,
-                      question: question.slice(0, 200),
-                    },
-                    environment: process.env.NODE_ENV || "development",
-                  },
-                },
-              ],
-            });
-            this.logger.debug(`创建 eval trace: ${evalTraceId}`);
-          } catch (traceError: any) {
-            this.logger.warn(`创建 eval trace 失败 [${index}]: ${traceError.message}`);
-            evalTraceId = undefined;
-          }
+          // 2. LLM 三维度评分
+          const evalResult = await this.evalScorer.score({
+            question,
+            context: retrievedChunks,
+            groundTruth,
+            answer: generatedAnswer,
+          });
 
-          console.log(`[DEBUG] Eval [${index}] traceId=${evalTraceId}, answer="${generatedAnswer.slice(0, 50)}"`);
-
-          // 创建 Dataset Run Item：将 dataset item 链接到 trace（关键！创建实验关联）
+          // 3. 关联实验 run（traceId 为空时跳过，不影响评分）
           let datasetRunId: string | undefined;
-          const runItemTraceId = evalTraceId || (evalHandler.last_trace_id && evalHandler.last_trace_id !== '00000000-0000-0000-0000-000000000000' ? evalHandler.last_trace_id : undefined);
+          const runItemTraceId =
+            queryTraceId ||
+            (evalHandler.last_trace_id &&
+            evalHandler.last_trace_id !== '00000000-0000-0000-0000-000000000000'
+              ? evalHandler.last_trace_id
+              : undefined);
           if (runItemTraceId) {
             try {
-              this.logger.log(`创建 DatasetRunItem: item=${item.id}, traceId=${runItemTraceId}`);
               const runItem = await (client as any).datasetRunItems.create({
                 runName: targetDataset!.name,
                 datasetItemId: item.id,
                 traceId: runItemTraceId,
               });
               datasetRunId = runItem.datasetRunId;
-              this.logger.log(`DatasetRunItem 创建成功: ${runItem.id}, runId=${datasetRunId}`);
             } catch (runItemError: any) {
               this.logger.warn(`DatasetRunItem 创建失败: ${(runItemError as Error).message}`);
             }
-          } else {
-            this.logger.warn(`traceId 为空，跳过 DatasetRunItem 创建`);
           }
 
-          // 计算评分指标
-          const itemScores = await this.evaluateAnswer(
-            question,
-            expectedAnswer,
-            generatedAnswer,
-          );
-
-          // 将评分推送到 LangFuse experiment run
-          // LangFuse v5 要求：score 必须且只能关联一个标识（traceId / sessionId / datasetRunId）
-          // 使用 datasetRunId 关联实验 run，确保分数显示在实验详情页的 Scores tab
-          for (const score of itemScores) {
-            const scoreTarget: any = {
-              name: score.name,
-              value: score.value,
-              datasetRunId: datasetRunId,
-            };
-            if (score.comment) {
-              scoreTarget.comment = score.comment;
-            }
+          // 4. 按维度推送 score（comment=理由，metadata=遗漏点）
+          const dimensions = [evalResult.relevancy, evalResult.faithfulness, evalResult.credibility];
+          for (const dim of dimensions) {
             try {
+              const scoreTarget: any = {
+                name: dim.name,
+                value: dim.value,
+                comment: dim.reason,
+                metadata: { missingPoints: dim.missingPoints },
+              };
+              // 关联标识：有 run 时带 datasetRunId，否则回退到 sessionId（避免为空被 LangFuse 拒绝）
+              if (datasetRunId) {
+                scoreTarget.datasetRunId = datasetRunId;
+              } else {
+                scoreTarget.sessionId = `eval-${resolvedDatasetId}-${item.id}`;
+              }
               await (client as any).scores.create(scoreTarget);
             } catch (scoreError: any) {
-              this.logger.warn(`创建 score 失败 [${index}] ${score.name}: ${(scoreError as Error).message}`);
+              this.logger.warn(`创建 score 失败 [${index}] ${dim.name}: ${(scoreError as Error).message}`);
             }
           }
 
           scores.push({
             itemId: item.id,
-            scores: itemScores,
+            scores: dimensions.map((d) => ({ name: d.name, value: d.value, comment: d.reason })),
           });
 
-          // 输出进度
-          const passed = itemScores.every((s) => s.value >= 0.5);
-          const status = passed ? '✅' : '❌';
-          const scoreStr = itemScores.map((s) => `${s.name}=${s.value.toFixed(2)}`).join(', ');
-          console.log(`[${index}/${items.length}] ${status} ${question.substring(0, 30)}... | ${scoreStr} | ${Math.round(Math.random() * 200 + 100)}ms`);
+          const scoreStr = dimensions.map((s) => `${s.name}=${s.value.toFixed(2)}`).join(', ');
+          console.log(`[${index}/${items.length}] ${question.substring(0, 30)}... | ${scoreStr}`);
         } catch (error) {
           this.logger.error(`评测失败 [${index}/${items.length}]: ${(error as Error).message}`);
-          console.log(`[${index}/${items.length}] ❌ ${question.substring(0, 30)}... | 失败: ${(error as Error).message}`);
-
-          // 失败时也记录，避免跳过
-          scores.push({
-            itemId: item.id,
-            scores: [],
-          });
+          scores.push({ itemId: item.id, scores: [] });
         }
       }
 

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { RAGModule } from '../rag/rag.module';
 import { ObservabilityModule } from '../../common/observability/observability.module';
 import { ExcelParserService } from './excel-parser.service';
+import { EvalScorerService } from './eval-scorer.service';
 import { LangfuseEvalService } from '../rag/langfuse-eval.service';
 import { EvalUploadCommand } from './eval.command';
 import { EvalRunCommand } from './eval.command';
@@ -11,7 +12,7 @@ import { EvalRunCommand } from './eval.command';
  */
 @Module({
   imports: [RAGModule, ObservabilityModule],
-  providers: [ExcelParserService, LangfuseEvalService, EvalUploadCommand, EvalRunCommand],
+  providers: [ExcelParserService, EvalScorerService, LangfuseEvalService, EvalUploadCommand, EvalRunCommand],
   exports: [LangfuseEvalService],
 })
 export class EvalModule {}

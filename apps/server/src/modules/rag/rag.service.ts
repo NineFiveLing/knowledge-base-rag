@@ -19,7 +19,6 @@ import { SearchService } from "../search/search.service";
 import { MemoryService } from "../memory/memory.service";
 import { Document } from "../document/entities/document.entity";
 import { withLLMRetry } from "../../common/utils/retry.util";
-import { LangfuseService } from "../../common/observability/langfuse.service";
 import { CallbackHandler } from "@langfuse/langchain";
 
 /** RAG 服务：组装完整的 LangGraph Agentic RAG 工作流 */
@@ -35,7 +34,6 @@ export class RAGService implements OnModuleInit {
     private search: SearchService,
     private memory: MemoryService,
     @InjectRepository(Document) private docRepo: Repository<Document>,
-    private langfuseService: LangfuseService,
   ) {
     const apiKey = config.get("ALIYUN_API_KEY");
     const baseURL = config.get("ALIYUN_BASE_URL");
@@ -176,10 +174,7 @@ export class RAGService implements OnModuleInit {
     sessionId: string,
     extraCallbacks?: CallbackHandler[],
   ): Promise<{ answer: string; traceId?: string }> {
-    const langfuseHandler = this.langfuseService.getCallbackHandler({
-      userId,
-      sessionId,
-    });
+    const langfuseHandler = this.createLangfuseHandler({ userId, sessionId });
 
     const callbacks = [...(extraCallbacks || [])];
     if (langfuseHandler) {
@@ -204,11 +199,7 @@ export class RAGService implements OnModuleInit {
     sessionId: string,
     conversationId?: string,
   ) {
-    const langfuseHandler = this.langfuseService.getCallbackHandler({
-      userId,
-      sessionId,
-      conversationId,
-    });
+    const langfuseHandler = this.createLangfuseHandler({ userId, sessionId, conversationId });
 
     return this.graph.streamEvents(
       {
@@ -221,6 +212,36 @@ export class RAGService implements OnModuleInit {
         callbacks: langfuseHandler ? [langfuseHandler] : [],
       },
     );
+  }
+
+  /** 根据用户/会话上下文创建带标签的 Langfuse CallbackHandler；未配置密钥时静默降级 */
+  private createLangfuseHandler(opts: {
+    userId: string;
+    sessionId: string;
+    conversationId?: string;
+  }): CallbackHandler | null {
+    const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
+    const secretKey = process.env.LANGFUSE_SECRET_KEY;
+    if (!publicKey || !secretKey) {
+      return null;
+    }
+
+    const tags = [`userId:${opts.userId}`, `sessionId:${opts.sessionId}`];
+    const metadata: Record<string, unknown> = {
+      userId: opts.userId,
+      sessionId: opts.sessionId,
+    };
+    if (opts.conversationId) {
+      tags.push(`conversationId:${opts.conversationId}`);
+      metadata.conversationId = opts.conversationId;
+    }
+
+    return new CallbackHandler({
+      userId: opts.userId,
+      sessionId: opts.sessionId,
+      tags,
+      traceMetadata: metadata,
+    });
   }
 
   /** 获取文本 Embedding */

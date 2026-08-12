@@ -1,6 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { RAGService } from './rag.service';
-import { LangfuseService } from '../../common/observability/langfuse.service';
 import { SearchService } from '../search/search.service';
 import { MemoryService } from '../memory/memory.service';
 import { ConfigService } from '@nestjs/config';
@@ -10,7 +9,6 @@ describe('RAGService - CallbackHandler Integration', () => {
   let service: RAGService;
   let mockSearch: jest.Mocked<SearchService>;
   let mockMemory: jest.Mocked<MemoryService>;
-  let mockLangfuse: jest.Mocked<LangfuseService>;
   let mockConfig: jest.Mocked<ConfigService>;
 
   beforeEach(async () => {
@@ -44,37 +42,15 @@ describe('RAGService - CallbackHandler Integration', () => {
       onMessage: jest.fn(),
     } as any;
 
-    mockLangfuse = {
-      getCallbackHandler: jest.fn().mockReturnValue(null),
-      getClient: jest.fn().mockReturnValue(null),
-      shutdown: jest.fn().mockResolvedValue(undefined),
-    } as any;
-
     const mockDocRepo = { find: jest.fn(), findOne: jest.fn(), save: jest.fn() } as any;
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RAGService,
-        {
-          provide: ConfigService,
-          useValue: mockConfig,
-        },
-        {
-          provide: LangfuseService,
-          useValue: mockLangfuse,
-        },
-        {
-          provide: SearchService,
-          useValue: mockSearch,
-        },
-        {
-          provide: MemoryService,
-          useValue: mockMemory,
-        },
-        {
-          provide: 'DocumentRepository',
-          useValue: mockDocRepo,
-        },
+        { provide: ConfigService, useValue: mockConfig },
+        { provide: SearchService, useValue: mockSearch },
+        { provide: MemoryService, useValue: mockMemory },
+        { provide: 'DocumentRepository', useValue: mockDocRepo },
       ],
     }).compile();
 
@@ -82,40 +58,35 @@ describe('RAGService - CallbackHandler Integration', () => {
     await service.onModuleInit?.();
   });
 
-  afterEach(async () => {
-    await mockLangfuse.shutdown?.();
+  afterEach(() => {
+    delete process.env.LANGFUSE_PUBLIC_KEY;
+    delete process.env.LANGFUSE_SECRET_KEY;
+    delete process.env.LANGFUSE_BASE_URL;
   });
 
-  describe('LangfuseService integration', () => {
-    it('should instantiate with all dependencies including LangfuseService', () => {
-      expect(service).toBeDefined();
-      expect(mockLangfuse.getCallbackHandler).toBeDefined();
-    });
-
-    it('should call getCallbackHandler with correct params', async () => {
-      const mockHandler = { tags: ['userId:user-1', 'sessionId:session-1'] } as any;
-      mockLangfuse.getCallbackHandler.mockReturnValue(mockHandler);
-
-      const handler = mockLangfuse.getCallbackHandler({
+  describe('createLangfuseHandler', () => {
+    it('should create handler with tags when keys are set', () => {
+      const handler = (service as any).createLangfuseHandler({
         userId: 'user-1',
         sessionId: 'session-1',
+        conversationId: 'conv-1',
       });
 
-      expect(mockLangfuse.getCallbackHandler).toHaveBeenCalledWith({
-        userId: 'user-1',
-        sessionId: 'session-1',
-        conversationId: undefined,
-      });
       expect(handler).not.toBeNull();
+      expect((handler as any).tags).toContain('userId:user-1');
+      expect((handler as any).tags).toContain('sessionId:session-1');
+      expect((handler as any).tags).toContain('conversationId:conv-1');
     });
 
-    it('should handle null CallbackHandler gracefully', async () => {
-      mockLangfuse.getCallbackHandler.mockReturnValue(null);
+    it('should return null when keys are not set', () => {
+      delete process.env.LANGFUSE_PUBLIC_KEY;
+      delete process.env.LANGFUSE_SECRET_KEY;
 
-      const handler = mockLangfuse.getCallbackHandler({
+      const handler = (service as any).createLangfuseHandler({
         userId: 'user-1',
         sessionId: 'session-1',
       });
+
       expect(handler).toBeNull();
     });
   });

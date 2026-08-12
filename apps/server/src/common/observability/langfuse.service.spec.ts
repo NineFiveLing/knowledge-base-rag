@@ -60,26 +60,6 @@ describe('LangfuseService', () => {
     }
   });
 
-  describe('getCallbackHandler', () => {
-    it('should return null when LANGFUSE_PUBLIC_KEY is not set', () => {
-      const handler = service.getCallbackHandler({
-        userId: 'user-1',
-        sessionId: 'session-1',
-      });
-      expect(handler).toBeNull();
-    });
-
-    it('should return null when LANGFUSE_PUBLIC_KEY is empty string', async () => {
-      const svc = await createModule({ LANGFUSE_PUBLIC_KEY: '' });
-      const handler = svc.getCallbackHandler({
-        userId: 'user-1',
-        sessionId: 'session-1',
-      });
-      expect(handler).toBeNull();
-      if ((svc as any).shutdown) await (svc as any).shutdown();
-    });
-  });
-
   describe('getClient', () => {
     it('should return null when LANGFUSE_PUBLIC_KEY is not set', async () => {
       const svc = await createModule({});
@@ -124,30 +104,6 @@ describe('LangfuseService', () => {
           baseUrl: undefined,
         }),
       );
-
-      if ((newService as any).shutdown) await (newService as any).shutdown();
-    });
-  });
-
-  describe('onModuleInit', () => {
-    it('should initialize LangFuse client when env vars are set', async () => {
-      const newService = await createModule({
-        LANGFUSE_PUBLIC_KEY: 'test-public-key',
-        LANGFUSE_SECRET_KEY: 'test-secret-key',
-        LANGFUSE_BASE_URL: 'https://cloud.langfuse.com',
-      });
-
-      const handler = newService.getCallbackHandler({
-        userId: 'user-1',
-        sessionId: 'session-1',
-        conversationId: 'conv-1',
-      });
-
-      expect(handler).not.toBeNull();
-      expect((handler as any).tags).toBeDefined();
-      expect((handler as any).tags).toContain('userId:user-1');
-      expect((handler as any).tags).toContain('sessionId:session-1');
-      expect((handler as any).tags).toContain('conversationId:conv-1');
 
       if ((newService as any).shutdown) await (newService as any).shutdown();
     });

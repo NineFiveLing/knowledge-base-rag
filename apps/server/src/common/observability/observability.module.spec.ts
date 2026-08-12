@@ -26,7 +26,7 @@ describe('ObservabilityModule', () => {
   it('should provide LangfuseService', () => {
     const service = module.get<LangfuseService>(LangfuseService);
     expect(service).toBeDefined();
-    expect(service.getCallbackHandler).toBeDefined();
+    expect(service.getClient).toBeDefined();
   });
 
   it('should export LangfuseService for other modules', () => {

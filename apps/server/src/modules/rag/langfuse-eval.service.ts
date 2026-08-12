@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { LangfuseService } from '../../common/observability/langfuse.service';
 import { RAGService } from './rag.service';
 import { ExcelParserService } from '../eval/excel-parser.service';
-import { ParsedTestCase } from '../eval/excel-parser.service';
 import { EvalScorerService } from '../eval/eval-scorer.service';
 import { CallbackHandler } from '@langfuse/langchain';
 
@@ -24,6 +23,8 @@ export interface EvaluationResult {
   scores: Array<{
     itemId: string;
     scores: Array<{ name: string; value: number; comment?: string }>;
+    /** 该用例评测是否失败（RAG 异常兜底或整体评测异常），CLI 统计时排除 */
+    failed?: boolean;
   }>;
 }
 
@@ -175,6 +176,9 @@ export class LangfuseEvalService {
         const question = (item.input as any)?.question || '';
         const groundTruth = (item.expectedOutput as any)?.answer || '';
 
+        // 标记该用例 RAG 是否失败（失败仍保留兜底分数供参考，但统计时排除）
+        let ragFailed = false;
+
         try {
           // 1. 跑 RAG（带 evalHandler 产生 trace）
           const evalHandler = new CallbackHandler({
@@ -205,6 +209,7 @@ export class LangfuseEvalService {
           } catch (ragError: any) {
             this.logger.warn(`RAG 执行失败 [${index}]: ${ragError.message}`);
             generatedAnswer = `[RAG Error] ${ragError.message.slice(0, 200)}`;
+            ragFailed = true;
           }
 
           // 2. LLM 三维度评分
@@ -244,7 +249,9 @@ export class LangfuseEvalService {
                 name: dim.name,
                 value: dim.value,
                 comment: dim.reason,
-                metadata: { missingPoints: dim.missingPoints },
+                metadata: ragFailed
+                  ? { missingPoints: dim.missingPoints, failed: true }
+                  : { missingPoints: dim.missingPoints },
               };
               // 关联标识：有 run 时带 datasetRunId，否则回退到 sessionId（避免为空被 LangFuse 拒绝）
               if (datasetRunId) {
@@ -261,13 +268,14 @@ export class LangfuseEvalService {
           scores.push({
             itemId: item.id,
             scores: dimensions.map((d) => ({ name: d.name, value: d.value, comment: d.reason })),
+            ...(ragFailed ? { failed: true } : {}),
           });
 
           const scoreStr = dimensions.map((s) => `${s.name}=${s.value.toFixed(2)}`).join(', ');
           console.log(`[${index}/${items.length}] ${question.substring(0, 30)}... | ${scoreStr}`);
         } catch (error) {
           this.logger.error(`评测失败 [${index}/${items.length}]: ${(error as Error).message}`);
-          scores.push({ itemId: item.id, scores: [] });
+          scores.push({ itemId: item.id, scores: [], failed: true });
         }
       }
 

@@ -247,6 +247,16 @@ describe('LangfuseEvalService', () => {
       expect(result.scores[1].scores.length).toBeGreaterThan(0); // item-2 RAG 失败但落入兜底文本继续评分（不跳过）
       expect(result.scores[2].scores.length).toBeGreaterThan(0); // item-3 有评分
 
+      // 失败标记断言：item-2 带 failed: true，成功项不带 failed 字段（为 falsy）
+      expect(result.scores[1].failed).toBe(true);
+      expect(result.scores[0].failed).toBeFalsy();
+      expect(result.scores[2].failed).toBeFalsy();
+
+      // 失败项 score 推送携带失败标记（metadata.failed: true）
+      expect(mockClient.scores.create).toHaveBeenCalledWith(
+        expect.objectContaining({ metadata: expect.objectContaining({ failed: true }) }),
+      );
+
       // 失败路径断言：item-2 RAG 失败无 traceId，跳过 run 关联；评分与 score 推送不受影响
       expect(mockClient.datasetRunItems.create).toHaveBeenCalledTimes(2); // 仅 item-1、item-3 关联 run
       expect(mockClient.scores.create).toHaveBeenCalledTimes(9); // 3 项 × 3 维度，含失败项 3 维

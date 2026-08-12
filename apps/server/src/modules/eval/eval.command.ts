@@ -183,7 +183,7 @@ export class EvalRunCommand extends CommandRunner {
       // 3. 输出统计报告
       console.log('\n📊 评测结果汇总');
 
-      const passedCount = result.scores.filter((s: any) => s.scores.length > 0).length;
+      const passedCount = result.scores.filter((s: any) => !s.failed).length;
       const passRate = ((passedCount / result.evaluatedCount) * 100).toFixed(1);
 
       console.log(`   通过: ${passedCount}/${result.evaluatedCount} (${passRate}%)`);

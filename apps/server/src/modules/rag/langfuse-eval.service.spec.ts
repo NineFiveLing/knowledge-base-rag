@@ -18,12 +18,11 @@ describe('LangfuseEvalService', () => {
 
     mockLangfuseService = {
       getClient: jest.fn(),
-      getCallbackHandler: jest.fn(),
       shutdown: jest.fn(),
     } as any;
 
     mockRagService = {
-      query: jest.fn().mockResolvedValue('test answer'),
+      query: jest.fn().mockResolvedValue({ answer: 'test answer' }),
     } as any;
 
     mockExcelParser = {

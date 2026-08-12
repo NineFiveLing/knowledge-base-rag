@@ -7,9 +7,6 @@ process.env.LANGFUSE_PUBLIC_KEY = '';
 process.env.LANGFUSE_SECRET_KEY = '';
 process.env.LANGFUSE_BASE_URL = 'https://cloud.langfuse.com';
 process.env.LANGFUSE_PROJECT_ID = '';
-process.env.OTEL_EXPORTER_OTLP_ENDPOINT = '';
-process.env.OTEL_SERVICE_NAME = 'knowledge-base-rag-server';
-process.env.OTEL_ENVIRONMENT = 'test';
 
 // 其他必需的 mock
 process.env.ALIYUN_API_KEY = 'test-api-key';

@@ -149,7 +149,7 @@ describe('LangfuseEvalService', () => {
   });
 
   describe('runEvaluationWithProgress', () => {
-    it('应该分批执行评测并返回评分结果', async () => {
+    it('应该分批执行评测，显式创建 eval trace 并关联，分数挂 traceId', async () => {
       const mockClient = {
         datasets: {
           list: jest.fn().mockResolvedValue({
@@ -165,6 +165,9 @@ describe('LangfuseEvalService', () => {
               { id: 'item-3', input: { question: 'Q3' }, expectedOutput: { answer: 'A3' } },
             ],
           }),
+        },
+        ingestion: {
+          batch: jest.fn().mockResolvedValue({ successes: [], errors: [] }),
         },
         datasetRunItems: {
           create: jest.fn().mockResolvedValue({ id: 'run-item-1', datasetRunId: 'run-1' }),
@@ -190,20 +193,37 @@ describe('LangfuseEvalService', () => {
 
       expect(mockRagService.queryWithContext).toHaveBeenCalledTimes(3);
       expect(mockEvalScorer.score).toHaveBeenCalledTimes(3);
+
+      // 每条用例显式创建 eval trace（trace-create），不再依赖 CallbackHandler
+      expect(mockClient.ingestion.batch).toHaveBeenCalledTimes(3);
+      const traceBody = mockClient.ingestion.batch.mock.calls[0][0].batch[0];
+      expect(traceBody.type).toBe('trace-create');
+      expect(traceBody.body.input).toBe('Q1');
+      expect(traceBody.body.output).toBe('generated answer');
+      expect(traceBody.body.sessionId).toBe('eval-dataset-123-item-1');
+
+      // run item 关联到显式创建的 eval traceId（不是 RAG 返回的 queryTraceId）
       expect(mockClient.datasetRunItems.create).toHaveBeenCalledTimes(3);
+      const runCall = mockClient.datasetRunItems.create.mock.calls[0][0];
+      expect(runCall.traceId).toBe(traceBody.body.id);
+      expect(runCall.traceId).not.toBe('trace-1');
+
+      // 三个维度分数挂在 traceId 上（保证实验页逐条可见）
       expect(mockClient.scores.create).toHaveBeenCalledTimes(9); // 3 用例 × 3 维度
       expect(mockClient.scores.create).toHaveBeenCalledWith(expect.objectContaining({
         name: 'credibility',
         value: 0.7,
-        datasetRunId: 'run-1',
+        traceId: expect.any(String),
         comment: '覆盖关键点',
         metadata: { missingPoints: ['未提及报销比例'] },
       }));
+      expect(mockClient.scores.create).not.toHaveBeenCalledWith(expect.objectContaining({ datasetRunId: 'run-1' }));
+
       expect(result.evaluatedCount).toBe(3);
       expect(result.scores).toHaveLength(3);
     });
 
-    it('应该在评测失败时继续执行剩余用例', async () => {
+    it('应该在评测失败时继续执行剩余用例，失败项仍建 trace 并打 failed 标记', async () => {
       const mockClient = {
         datasets: {
           list: jest.fn().mockResolvedValue({
@@ -219,6 +239,9 @@ describe('LangfuseEvalService', () => {
               { id: 'item-3', input: { question: 'Q3' }, expectedOutput: { answer: 'A3' } },
             ],
           }),
+        },
+        ingestion: {
+          batch: jest.fn().mockResolvedValue({ successes: [], errors: [] }),
         },
         datasetRunItems: {
           create: jest.fn().mockResolvedValue({ id: 'run-item-1', datasetRunId: 'run-1' }),
@@ -244,7 +267,7 @@ describe('LangfuseEvalService', () => {
       expect(mockRagService.queryWithContext).toHaveBeenCalledTimes(3);
       expect(result.evaluatedCount).toBe(3); // 3 条用例都处理了
       expect(result.scores[0].scores.length).toBeGreaterThan(0); // item-1 有评分
-      expect(result.scores[1].scores.length).toBeGreaterThan(0); // item-2 RAG 失败但落入兜底文本继续评分（不跳过）
+      expect(result.scores[1].scores.length).toBeGreaterThan(0); // item-2 RAG 失败但落入兜底文本继续评分
       expect(result.scores[2].scores.length).toBeGreaterThan(0); // item-3 有评分
 
       // 失败标记断言：item-2 带 failed: true，成功项不带 failed 字段（为 falsy）
@@ -257,14 +280,65 @@ describe('LangfuseEvalService', () => {
         expect.objectContaining({ metadata: expect.objectContaining({ failed: true }) }),
       );
 
-      // 失败路径断言：item-2 RAG 失败无 traceId，跳过 run 关联；评分与 score 推送不受影响
-      expect(mockClient.datasetRunItems.create).toHaveBeenCalledTimes(2); // 仅 item-1、item-3 关联 run
-      expect(mockClient.scores.create).toHaveBeenCalledTimes(9); // 3 项 × 3 维度，含失败项 3 维
+      // 所有项（含 RAG 失败项）都显式建 trace 并关联 run，分数统一挂 traceId
+      expect(mockClient.ingestion.batch).toHaveBeenCalledTimes(3);
+      const failedTraceBody = mockClient.ingestion.batch.mock.calls[1][0].batch[0];
+      expect(failedTraceBody.body.output).toContain('[RAG Error]');
+      expect(failedTraceBody.body.metadata.failed).toBe(true);
+      expect(mockClient.datasetRunItems.create).toHaveBeenCalledTimes(3);
+
+      expect(mockClient.scores.create).toHaveBeenCalledTimes(9); // 3 项 × 3 维度
+      expect(mockClient.scores.create).toHaveBeenCalledWith(expect.objectContaining({ traceId: expect.any(String) }));
+      expect(mockClient.scores.create).not.toHaveBeenCalledWith(expect.objectContaining({ datasetRunId: 'run-1' }));
+      expect(mockClient.scores.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'eval-dataset-123-item-2' }),
+      );
+    });
+
+    it('创建 eval trace 失败时回退 sessionId 关联分数，且不中断', async () => {
+      const mockClient = {
+        datasets: {
+          list: jest.fn().mockResolvedValue({
+            data: [{ id: 'dataset-123', name: 'test-dataset' }],
+          }),
+          getRuns: jest.fn().mockResolvedValue({ data: [] }),
+        },
+        datasetItems: {
+          list: jest.fn().mockResolvedValue({
+            data: [{ id: 'item-1', input: { question: 'Q1' }, expectedOutput: { answer: 'A1' } }],
+          }),
+        },
+        ingestion: {
+          batch: jest.fn().mockRejectedValue(new Error('ingestion 失败')),
+        },
+        datasetRunItems: {
+          create: jest.fn().mockResolvedValue({ id: 'run-item-1', datasetRunId: 'run-1' }),
+        },
+        scores: {
+          create: jest.fn().mockResolvedValue({ id: 'score-1' }),
+        },
+      };
+
+      mockLangfuseService.getClient.mockReturnValue(mockClient as any);
+      mockRagService.queryWithContext.mockResolvedValue({
+        answer: 'generated answer',
+        retrievedChunks: [],
+        traceId: 'trace-1',
+      });
+      mockEvalScorer.score.mockResolvedValue({
+        relevancy: { name: 'relevancy', value: 0.9, reason: '切题', missingPoints: [] },
+        faithfulness: { name: 'faithfulness', value: 0.8, reason: '有据', missingPoints: [] },
+        credibility: { name: 'credibility', value: 0.7, reason: '覆盖关键点', missingPoints: [] },
+      });
+
+      const result = await service.runEvaluationWithProgress('dataset-123', { batchSize: 10 });
+
+      expect(result.evaluatedCount).toBe(1);
+      // trace 创建失败 → 跳过 run 关联，分数回退 sessionId 仍正常推送
+      expect(mockClient.datasetRunItems.create).not.toHaveBeenCalled();
+      expect(mockClient.scores.create).toHaveBeenCalledTimes(3);
       expect(mockClient.scores.create).toHaveBeenCalledWith(expect.objectContaining({
-        sessionId: 'eval-dataset-123-item-2', // 失败项走 sessionId 回退分支
-      }));
-      expect(mockClient.scores.create).toHaveBeenCalledWith(expect.objectContaining({
-        datasetRunId: 'run-1', // 成功项仍走 datasetRunId 分支
+        sessionId: 'eval-dataset-123-item-1',
       }));
     });
 

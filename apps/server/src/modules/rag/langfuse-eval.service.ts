@@ -3,7 +3,6 @@ import { LangfuseService } from '../../common/observability/langfuse.service';
 import { RAGService } from './rag.service';
 import { ExcelParserService } from '../eval/excel-parser.service';
 import { EvalScorerService } from '../eval/eval-scorer.service';
-import { CallbackHandler } from '@langfuse/langchain';
 
 export interface TestCase {
   input: string;
@@ -180,32 +179,17 @@ export class LangfuseEvalService {
         let ragFailed = false;
 
         try {
-          // 1. 跑 RAG（带 evalHandler 产生 trace）
-          const evalHandler = new CallbackHandler({
-            userId: 'eval-user',
-            sessionId: `eval-${resolvedDatasetId}-${item.id}`,
-            tags: [`datasetId:${resolvedDatasetId}`, `datasetItemId:${item.id}`],
-            traceMetadata: {
-              datasetId: resolvedDatasetId,
-              datasetItemId: item.id,
-              datasetName: targetDataset!.name,
-              evalRun: true,
-            },
-          });
-
+          // 1. 跑 RAG（评测 trace 由步骤 3 显式创建，不依赖 CallbackHandler）
           let generatedAnswer = '';
           let retrievedChunks: string[] = [];
-          let queryTraceId: string | undefined;
           try {
             const result = await this.ragService.queryWithContext(
               question,
               'eval-user',
               `eval-${resolvedDatasetId}-${item.id}`,
-              [evalHandler],
             );
             generatedAnswer = result.answer;
             retrievedChunks = result.retrievedChunks;
-            queryTraceId = result.traceId;
           } catch (ragError: any) {
             this.logger.warn(`RAG 执行失败 [${index}]: ${ragError.message}`);
             generatedAnswer = `[RAG Error] ${ragError.message.slice(0, 200)}`;
@@ -220,28 +204,56 @@ export class LangfuseEvalService {
             answer: generatedAnswer,
           });
 
-          // 3. 关联实验 run（traceId 为空时跳过，不影响评分）
-          let datasetRunId: string | undefined;
-          const runItemTraceId =
-            queryTraceId ||
-            (evalHandler.last_trace_id &&
-            evalHandler.last_trace_id !== '00000000-0000-0000-0000-000000000000'
-              ? evalHandler.last_trace_id
-              : undefined);
-          if (runItemTraceId) {
+          // 3. 显式创建 eval trace（input=问题, output=回答），保证实验详情有真实 trace 可渲染
+          let evalTraceId: string | undefined;
+          try {
+            const newTraceId = crypto.randomUUID();
+            await (client as any).ingestion.batch({
+              batch: [
+                {
+                  type: 'trace-create',
+                  id: crypto.randomUUID(),
+                  timestamp: new Date().toISOString(),
+                  body: {
+                    id: newTraceId,
+                    name: `eval-${item.id.slice(0, 8)}`,
+                    userId: 'eval-user',
+                    sessionId: `eval-${resolvedDatasetId}-${item.id}`,
+                    input: question || null,
+                    output: generatedAnswer || null,
+                    tags: [`datasetId:${resolvedDatasetId}`, `datasetItemId:${item.id}`, `eval-run`],
+                    metadata: {
+                      datasetId: resolvedDatasetId,
+                      datasetItemId: item.id,
+                      datasetName: targetDataset!.name,
+                      evalRun: true,
+                      ...(ragFailed ? { failed: true } : {}),
+                    },
+                    environment: process.env.NODE_ENV || 'development',
+                  },
+                },
+              ],
+            });
+            // 只有 ingestion 成功后才认为 trace 已创建，避免关联到不存在的 trace
+            evalTraceId = newTraceId;
+          } catch (traceError: any) {
+            this.logger.warn(`创建 eval trace 失败 [${index}]: ${(traceError as Error).message}`);
+          }
+
+          // 4. 关联实验 run（用真实 evalTraceId；trace 创建失败时跳过，不影响评分）
+          if (evalTraceId) {
             try {
-              const runItem = await (client as any).datasetRunItems.create({
+              await (client as any).datasetRunItems.create({
                 runName: targetDataset!.name,
                 datasetItemId: item.id,
-                traceId: runItemTraceId,
+                traceId: evalTraceId,
               });
-              datasetRunId = runItem.datasetRunId;
             } catch (runItemError: any) {
               this.logger.warn(`DatasetRunItem 创建失败: ${(runItemError as Error).message}`);
             }
           }
 
-          // 4. 按维度推送 score（comment=理由，metadata=遗漏点）
+          // 5. 按维度推送 score（comment=理由，metadata=遗漏点），挂到 traceId 保证实验页逐条可见
           const dimensions = [evalResult.relevancy, evalResult.faithfulness, evalResult.credibility];
           for (const dim of dimensions) {
             try {
@@ -253,9 +265,9 @@ export class LangfuseEvalService {
                   ? { missingPoints: dim.missingPoints, failed: true }
                   : { missingPoints: dim.missingPoints },
               };
-              // 关联标识：有 run 时带 datasetRunId，否则回退到 sessionId（避免为空被 LangFuse 拒绝）
-              if (datasetRunId) {
-                scoreTarget.datasetRunId = datasetRunId;
+              // 关联标识：优先 traceId（run item 可见）；trace 创建失败时回退 sessionId
+              if (evalTraceId) {
+                scoreTarget.traceId = evalTraceId;
               } else {
                 scoreTarget.sessionId = `eval-${resolvedDatasetId}-${item.id}`;
               }
